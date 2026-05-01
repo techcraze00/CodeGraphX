@@ -86,11 +86,78 @@ class CodeGraphXServer {
             properties: {},
           },
         },
+        {
+          name: "list_files",
+          description: "List all files in the codebase with a summary of their contents.",
+          inputSchema: {
+            type: "object",
+            properties: {
+              filter: {
+                type: "string",
+                description: "Optional glob or substring filter for file paths.",
+              },
+            },
+          },
+        },
+        {
+          name: "query_symbol",
+          description: "Get detailed information about a specific symbol (function, class, etc.).",
+          inputSchema: {
+            type: "object",
+            properties: {
+              name: {
+                type: "string",
+                description: "The name of the symbol to query. Can be a bare name or 'file::name' for exact matching.",
+              },
+            },
+            required: ["name"],
+          },
+        },
+        {
+          name: "check_symbol_exists",
+          description: "Instantly check if a symbol exists using a Bloom filter.",
+          inputSchema: {
+            type: "object",
+            properties: {
+              name: {
+                type: "string",
+                description: "The name of the symbol to check.",
+              },
+            },
+            required: ["name"],
+          },
+        },
+        {
+          name: "trace_impact",
+          description: "Trace the upstream or downstream impact of a symbol.",
+          inputSchema: {
+            type: "object",
+            properties: {
+              symbol: {
+                type: "string",
+                description: "The symbol to trace (name or 'file::name').",
+              },
+              direction: {
+                type: "string",
+                enum: ["upstream", "downstream"],
+                description: "The direction to trace: 'upstream' for callers, 'downstream' for callees.",
+              },
+              depth: {
+                type: "integer",
+                default: 3,
+                description: "Maximum depth to trace (default 3).",
+              },
+            },
+            required: ["symbol", "direction"],
+          },
+        },
       ],
     }));
 
     this.server.setRequestHandler(CallToolRequestSchema, async (request) => {
-      if (request.params.name === "get_graph_status") {
+      const { name, arguments: args } = request.params;
+
+      if (name === "get_graph_status") {
         const fileCount = this.graph.files.length;
         const symbolCount = this.graph.files.reduce((n, f) => n + (f.symbols?.length || 0), 0);
         const edgeCount = this.graph.edges.length;
@@ -111,7 +178,197 @@ class CodeGraphXServer {
         };
       }
 
-      throw new Error(`Tool not found: ${request.params.name}`);
+      if (name === "list_files") {
+        const filter = args?.filter?.toLowerCase();
+        const files = this.graph.files
+          .filter(f => !filter || f.file.toLowerCase().includes(filter))
+          .map(f => ({
+            file: f.file,
+            summary: (f.symbols || [])
+              .filter(s => ['class', 'function'].includes(s.type))
+              .map(s => s.name)
+              .join(', ') || 'No main symbols'
+          }));
+
+        return {
+          content: [
+            {
+              type: "text",
+              text: JSON.stringify(files, null, 2),
+            },
+          ],
+        };
+      }
+
+      if (name === "query_symbol") {
+        const symbolName = args?.name;
+        if (!symbolName) {
+          throw new Error("Symbol name is required");
+        }
+
+        let matches = [];
+        if (symbolName.includes("::")) {
+          const [filePath, sym] = symbolName.split("::");
+          const fileData = this.graph.files.find(f => f.file === filePath);
+          if (fileData) {
+            const symbol = (fileData.symbols || []).find(s => s.name === sym);
+            if (symbol) {
+              matches.push({ file: fileData.file, symbol });
+            }
+          }
+        } else {
+          this.graph.files.forEach(f => {
+            (f.symbols || []).forEach(s => {
+              if (s.name === symbolName) {
+                matches.push({ file: f.file, symbol: s });
+              }
+            });
+          });
+        }
+
+        if (matches.length === 0) {
+          return {
+            content: [
+              {
+                type: "text",
+                text: `No symbol named "${symbolName}" found.`,
+              },
+            ],
+            isError: true,
+          };
+        }
+
+        const results = matches.map(match => ({
+          file: match.file,
+          type: match.symbol.type,
+          location: match.symbol.startPosition ? `row ${match.symbol.startPosition.row + 1}` : "unknown",
+          calls: match.symbol.calls || [],
+          called_by: match.symbol.called_by || [],
+          imports: match.symbol.imports || [],
+        }));
+
+        return {
+          content: [
+            {
+              type: "text",
+              text: JSON.stringify(results, null, 2),
+            },
+          ],
+        };
+      }
+
+      if (name === "check_symbol_exists") {
+        const symbolName = args?.name;
+        if (!symbolName) {
+          throw new Error("Symbol name is required");
+        }
+
+        if (!this.bloom) {
+          return {
+            content: [
+              {
+                type: "text",
+                text: "Bloom filter not loaded. Cannot perform instant check.",
+              },
+            ],
+            isError: true,
+          };
+        }
+
+        const exists = this.bloom.has(symbolName);
+        return {
+          content: [
+            {
+              type: "text",
+              text: JSON.stringify({
+                name: symbolName,
+                exists: exists ? "probable_yes" : "definite_no",
+              }, null, 2),
+            },
+          ],
+        };
+      }
+
+      if (name === "trace_impact") {
+        const { symbol: startSymbol, direction, depth = 3 } = args;
+        if (!startSymbol || !direction) {
+          throw new Error("Symbol and direction are required");
+        }
+
+        const findSymbol = (id) => {
+          let filePath, symName;
+          if (id.includes("::")) {
+            const parts = id.split("::");
+            filePath = parts[0];
+            symName = parts[1];
+          } else {
+            symName = id;
+          }
+
+          for (const f of this.graph.files) {
+            if (filePath && f.file !== filePath) continue;
+            const symbol = (f.symbols || []).find(s => s.name === symName);
+            if (symbol) return { file: f.file, symbol, id: `${f.file}::${symbol.name}` };
+          }
+          return null;
+        };
+
+        const startNode = findSymbol(startSymbol);
+        if (!startNode) {
+          return {
+            content: [{ type: "text", text: `Symbol "${startSymbol}" not found.` }],
+            isError: true,
+          };
+        }
+
+        const visited = new Set();
+        const results = [];
+        const queue = [{ id: startNode.id, depth: 0 }];
+        visited.add(startNode.id);
+
+        while (queue.length > 0) {
+          const { id, depth: currentDepth } = queue.shift();
+          const node = findSymbol(id);
+          
+          if (!node) continue;
+
+          const neighbors = direction === "downstream" ? 
+            (node.symbol.calls || []) : 
+            (node.symbol.called_by || []);
+
+          results.push({
+            id: node.id,
+            depth: currentDepth,
+            type: node.symbol.type,
+            [direction === "downstream" ? "calls" : "called_by"]: neighbors
+          });
+
+          if (currentDepth < depth) {
+            for (const neighbor of neighbors) {
+              if (!visited.has(neighbor)) {
+                visited.add(neighbor);
+                queue.push({ id: neighbor, depth: currentDepth + 1 });
+              }
+            }
+          }
+        }
+
+        return {
+          content: [
+            {
+              type: "text",
+              text: JSON.stringify({
+                startSymbol: startNode.id,
+                direction,
+                maxDepth: depth,
+                impactGraph: results
+              }, null, 2),
+            },
+          ],
+        };
+      }
+
+      throw new Error(`Tool not found: ${name}`);
     });
   }
 
