@@ -1,6 +1,11 @@
 const { Server } = require("@modelcontextprotocol/sdk/server/index.js");
 const { StdioServerTransport } = require("@modelcontextprotocol/sdk/server/stdio.js");
-const { CallToolRequestSchema, ListToolsRequestSchema } = require("@modelcontextprotocol/sdk/types.js");
+const { 
+  CallToolRequestSchema, 
+  ListToolsRequestSchema,
+  ListResourcesRequestSchema,
+  ReadResourceRequestSchema
+} = require("@modelcontextprotocol/sdk/types.js");
 const { GraphStore } = require("../store");
 const { loadConfig } = require("../utils");
 const { buildCallEdges } = require("../edgebuilder");
@@ -18,6 +23,7 @@ class CodeGraphXServer {
       {
         capabilities: {
           tools: {},
+          resources: {},
         },
       }
     );
@@ -29,6 +35,7 @@ class CodeGraphXServer {
     this.bloom = null;
 
     this.setupTools();
+    this.setupResources();
     
     // Error handling
     this.server.onerror = (error) => console.error("[MCP Error]", error);
@@ -149,6 +156,20 @@ class CodeGraphXServer {
               },
             },
             required: ["symbol", "direction"],
+          },
+        },
+        {
+          name: "get_session_diff",
+          description: "Get a summary of changes in the current session or a specific branch.",
+          inputSchema: {
+            type: "object",
+            properties: {
+              branch: {
+                type: "string",
+                description: "The branch or commit to diff against HEAD~1 (default: 'HEAD').",
+                default: "HEAD",
+              },
+            },
           },
         },
       ],
@@ -368,7 +389,132 @@ class CodeGraphXServer {
         };
       }
 
+      if (name === "get_session_diff") {
+        const branch = args?.branch || "HEAD";
+        const { scanCommit } = require("../git/commit-scanner");
+        const summary = scanCommit(this.projectRoot, this.store, branch);
+
+        if (!summary) {
+          return {
+            content: [{ type: "text", text: "No changes found or not a git repository." }],
+            isError: true,
+          };
+        }
+
+        return {
+          content: [
+            {
+              type: "text",
+              text: JSON.stringify(summary, null, 2),
+            },
+          ],
+        };
+      }
+
       throw new Error(`Tool not found: ${name}`);
+    });
+  }
+
+  setupResources() {
+    this.server.setRequestHandler(ListResourcesRequestSchema, async () => ({
+      resources: [
+        {
+          uri: "codegraphx://file-index",
+          name: "CodeGraphX File Index",
+          mimeType: "text/plain",
+          description: "One-liner summary of every file in the codebase."
+        },
+        {
+          uri: "codegraphx://changelog",
+          name: "CodeGraphX Changelog",
+          mimeType: "text/plain",
+          description: "Session and commit history of code changes."
+        }
+      ]
+    }));
+
+    this.server.setRequestHandler(ReadResourceRequestSchema, async (request) => {
+      const uri = request.params.uri;
+      const outputDir = path.join(this.projectRoot, this.config.outputDir);
+
+      if (uri === "codegraphx://file-index") {
+        const toonPath = path.join(outputDir, "file_index.toon");
+        let content = "";
+
+        if (fs.existsSync(toonPath)) {
+          try {
+            const { decode } = require("@toon-format/toon");
+            const raw = fs.readFileSync(toonPath, "utf8");
+            const decoded = decode(raw);
+            content = JSON.stringify(decoded, null, 2);
+          } catch (e) {
+            console.error("[MCP Resource] Failed to decode TOON file-index:", e.message);
+          }
+        }
+
+        if (!content) {
+          // Fallback to codebase.json
+          const codebasePath = path.join(outputDir, this.config.outputFile);
+          const customPath = path.join(outputDir, "custom_codebase.json");
+          const fallbackPath = fs.existsSync(codebasePath) ? codebasePath : (fs.existsSync(customPath) ? customPath : null);
+
+          if (fallbackPath) {
+            try {
+              const data = JSON.parse(fs.readFileSync(fallbackPath, "utf8"));
+              const index = {
+                files: (data.files || []).map(f => ({
+                  file: f.file,
+                  summary: (f.symbols || [])
+                    .filter(s => ['class', 'function'].includes(s.type))
+                    .map(s => s.name)
+                    .join(', ') || 'No main symbols'
+                }))
+              };
+              content = JSON.stringify(index, null, 2);
+            } catch (e) {
+              console.error("[MCP Resource] Fallback failed:", e.message);
+            }
+          }
+        }
+
+        return {
+          contents: [
+            {
+              uri,
+              mimeType: "text/plain",
+              text: content || "File index not available."
+            }
+          ]
+        };
+      }
+
+      if (uri === "codegraphx://changelog") {
+        const toonPath = path.join(outputDir, "CHANGELOG.toon");
+        let content = "";
+
+        if (fs.existsSync(toonPath)) {
+          try {
+            const { decode } = require("@toon-format/toon");
+            const raw = fs.readFileSync(toonPath, "utf8");
+            const decoded = decode(raw);
+            content = JSON.stringify(decoded, null, 2);
+          } catch (e) {
+            console.error("[MCP Resource] Failed to decode TOON changelog:", e.message);
+          }
+        }
+
+        return {
+          contents: [
+            {
+              uri,
+              mimeType: "text/plain",
+              text: content || "Changelog not available."
+            }
+          ]
+        };
+      }
+
+      throw new Error(`Resource not found: ${uri}`);
     });
   }
 

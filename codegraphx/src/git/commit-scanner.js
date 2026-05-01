@@ -1,10 +1,10 @@
-const { execSync } = require('child_process');
+const { execFileSync } = require('child_process');
 const fs = require('fs');
 const path = require('path');
 
-function runGit(cmd) {
+function runGit(args) {
   try {
-    return execSync(cmd, { encoding: 'utf8' }).trim();
+    return execFileSync('git', args, { encoding: 'utf8' }).trim();
   } catch (e) {
     return '';
   }
@@ -54,7 +54,9 @@ function parseDiff(diffStr) {
 }
 
 function mapDiffToNodes(changes, filesData) {
-  const impactedNodes = [];
+  const added = [];
+  const removed = [];
+  const modified = [];
   
   for (const [file, diff] of Object.entries(changes)) {
     const fileData = filesData.find(f => f.file === file);
@@ -65,17 +67,19 @@ function mapDiffToNodes(changes, filesData) {
       // startPosition.row is 0-based, diff lines are 1-based
       const symRow = sym.startPosition.row + 1;
       
-      // Simple heuristic: if any added/removed line is near the symbol start, count it.
-      // A better AST mapper would check endPosition too.
-      const isChanged = diff.added.some(l => Math.abs(l - symRow) <= 5) || 
-                        diff.removed.some(l => Math.abs(l - symRow) <= 5);
+      const hasAdded = diff.added.some(l => Math.abs(l - symRow) <= 5);
+      const hasRemoved = diff.removed.some(l => Math.abs(l - symRow) <= 5);
       
-      if (isChanged) {
-        impactedNodes.push(`${file}::${sym.name}`);
+      if (hasAdded && !hasRemoved) {
+        added.push(`${file}::${sym.name}`);
+      } else if (hasRemoved && !hasAdded) {
+        removed.push(`${file}::${sym.name}`);
+      } else if (hasAdded && hasRemoved) {
+        modified.push(`${file}::${sym.name}`);
       }
     }
   }
-  return impactedNodes;
+  return { added, removed, modified };
 }
 
 function generateSummary(diffStr) {
@@ -98,21 +102,23 @@ function generateSummary(diffStr) {
 }
 
 function scanCommit(projectRoot, store, branch = 'HEAD') {
-  const currentBranch = runGit('git rev-parse --abbrev-ref HEAD');
-  const commitHash = runGit(`git log -1 --pretty=%H ${branch}`);
-  const diffStr = runGit(`git diff ${branch}~1 ${branch} --unified=0`);
+  const currentBranch = runGit(['rev-parse', '--abbrev-ref', 'HEAD']);
+  const commitHash = runGit(['log', '-1', '--pretty=%H', branch]);
+  const diffStr = runGit(['diff', `${branch}~1`, branch, '--unified=0']);
   
   if (!diffStr) return null;
 
   const changes = parseDiff(diffStr);
-  const impactedNodes = mapDiffToNodes(changes, store.getFilesData());
+  const { added, removed, modified } = mapDiffToNodes(changes, store.getFilesData());
   const ruleSummary = generateSummary(diffStr);
 
   return {
     date: new Date().toISOString(),
     commit: commitHash,
     branch: currentBranch,
-    changed_nodes: impactedNodes,
+    added,
+    removed,
+    modified,
     rule_summary: ruleSummary
   };
 }
