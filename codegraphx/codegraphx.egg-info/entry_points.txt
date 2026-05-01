@@ -1,0 +1,3 @@
+[console_scripts]
+cgx = codegraphx.main:main
+codegraphx = codegraphx.main:main

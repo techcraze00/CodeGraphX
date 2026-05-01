@@ -1,0 +1,41 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*.so
+
+# Virtualenv
+.venv/
+venv/
+ENV/
+
+# Test coverage
+.coverage
+htmlcov/
+
+# IDE & editor
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Mac OS
+.DS_Store
+
+# Output folder (ask before ignoring)
+.codegraphx/
+
+# Node
+node_modules/
+package-lock.json
+
+# Temporary test files
+watch_pid.txt
+watch_test.log
+a.py
+test.py
+import_test.py
+live_test.py
+mf.html
+mf.js
+.gemini/
+.ruff_cache/
