@@ -42,3 +42,12 @@ CodeGraphX generates a `GEMINI.md` file so coding agents can seamlessly read:
 2. `.codegraphx/CHANGELOG.toon`: For session/commit diffs and history.
 3. `.codegraphx/codegraph.toon`: For full dependency and impact analysis.
 4. `.codegraphx/symbols.bloom`: For O(1) symbol lookup.
+
+### Why an MCP Server?
+
+While agents can read the `.toon` files directly, an **MCP (Model Context Protocol) Server** acts as an active intelligence layer that further optimizes the experience:
+
+- **Instant Orientation:** Instead of reading files into context, the agent calls a tool to get a project map, saving thousands of tokens on "cold starts."
+- **Zero-Scan Impact Analysis:** The agent can query the graph directly ("What breaks if I change X?") instead of running multiple `grep` searches.
+- **Symbol Discovery:** High-speed lookup using the Bloom filter via structured tool calls.
+- **Context Efficiency:** The server only sends the *relevant* parts of the graph back to the agent, keeping the conversation fast and focused.

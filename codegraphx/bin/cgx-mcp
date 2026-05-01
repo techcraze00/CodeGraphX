@@ -2,13 +2,15 @@
 /**
  * CodeGraphX MCP Server Entry Point
  */
-const path = require('path');
+const { CodeGraphXServer } = require('../src/server/mcp-server.js');
 
-console.error('CodeGraphX MCP Server starting...');
-
-// The actual implementation will be in src/server/mcp-server.js
-// For now, this is a placeholder to verify the environment.
-// require('../src/server/mcp-server.js');
-
-process.stderr.write('MCP Environment Ready\n');
-process.exit(0);
+const server = new CodeGraphXServer();
+server.initialize().then(() => {
+  server.run().catch((error) => {
+    console.error("Server error:", error);
+    process.exit(1);
+  });
+}).catch((error) => {
+  console.error("Initialization error:", error);
+  process.exit(1);
+});
