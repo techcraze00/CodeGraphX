@@ -12,9 +12,12 @@
   "type": "commonjs",
   "bin": {
     "codegraphx": "bin/codegraphx",
-    "cgx": "bin/cgx"
+    "cgx": "bin/cgx",
+    "cgx-mcp": "bin/cgx-mcp"
   },
   "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.29.0",
+    "@toon-format/toon": "^2.1.0",
     "chokidar": "^5.0.0",
     "commander": "^14.0.3",
     "tree-sitter": "^0.25.0",
