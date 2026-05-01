@@ -20,6 +20,7 @@ function extractJS(tree, contents) {
   let stack = [tree.rootNode];
   while (stack.length) {
     const node = stack.pop();
+    if (!node) continue;
     if (node.type === "function_declaration") {
       symbols.push({
         type: "function",
@@ -54,6 +55,7 @@ function extractHTML(tree, contents) {
   let stack = [tree.rootNode];
   while (stack.length) {
     const node = stack.pop();
+    if (!node) continue;
     if (node.type === "element") {
       symbols.push({ type: "element", tag: node.childForFieldName("name")?.text, startPosition: node.startPosition });
     }
@@ -69,6 +71,7 @@ function extractCSS(tree, contents) {
   let stack = [tree.rootNode];
   while (stack.length) {
     const node = stack.pop();
+    if (!node) continue;
     if (node.type === "class_selector") {
       const nameNode = node.childForFieldName("name") || node.children.find(n => n.type === "class_name");
       if (nameNode) symbols.push({ type: node.type, name: '.' + nameNode.text, startPosition: node.startPosition });
