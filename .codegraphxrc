@@ -1,0 +1,6 @@
+{
+  "ignore": [".git", ".codegraphx", "node_modules", "tests", "__pycache__"],
+  "outputDir": ".codegraphx",
+  "outputFile": "custom_codebase.json",
+  "extensions": [".py"]
+}

@@ -1,0 +1,21 @@
+[project]
+name = "codegraphx"
+version = "0.1.0"
+description = "Token-efficient codebase graph builder for AI coding agents"
+authors = [
+    {name = "Prayas"},
+]
+readme = "README.md"
+requires-python = ">=3.8"
+license = {text = "MIT"}
+
+[project.scripts]
+codegraphx = "codegraphx.main:main"
+cgx = "codegraphx.main:main"
+
+[tool.setuptools.packages.find]
+where = ["codegraphx"]
+
+[build-system]
+requires = ["setuptools", "wheel"]
+build-backend = "setuptools.build_meta"
