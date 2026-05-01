@@ -69,8 +69,12 @@ function extractCSS(tree, contents) {
   let stack = [tree.rootNode];
   while (stack.length) {
     const node = stack.pop();
-    if (node.type === "class_selector" || node.type === "id_selector") {
-      symbols.push({ type: node.type, name: node.text, startPosition: node.startPosition });
+    if (node.type === "class_selector") {
+      const nameNode = node.childForFieldName("name") || node.children.find(n => n.type === "class_name");
+      if (nameNode) symbols.push({ type: node.type, name: '.' + nameNode.text, startPosition: node.startPosition });
+    } else if (node.type === "id_selector") {
+      const nameNode = node.childForFieldName("name") || node.children.find(n => n.type === "id_name");
+      if (nameNode) symbols.push({ type: node.type, name: '#' + nameNode.text, startPosition: node.startPosition });
     }
     for (let i = node.namedChildCount - 1; i >= 0; i--) {
       stack.push(node.namedChild(i));

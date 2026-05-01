@@ -1,6 +1,5 @@
 const { parseFile } = require('./parser');
-const { extractPython, extractJS, extractTS, extractHTML } = require('./graph');
-// (CSS stub inline to avoid circular deps)
+const { extractPython, extractJS, extractTS, extractHTML, extractCSS } = require('./graph');
 
 // Top-level extractor that delegates by language
 function extractEntities(file, contents) {
@@ -12,7 +11,7 @@ function extractEntities(file, contents) {
     case 'typescript':
     case 'tsx': return extractTS(tree, contents);
     case 'html': return extractHTML(tree, contents);
-    case 'css': return { symbols: [], imports: [] }; // CSS temporarily disabled for CJS compatibility
+    case 'css': return extractCSS(tree, contents);
     default: return { symbols: [], imports: [], functions: [], classes: [] };
   }
 }

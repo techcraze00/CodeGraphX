@@ -1,7 +1,6 @@
 const { execSync } = require('child_process');
 const fs = require('fs');
 const path = require('path');
-const { encode } = require('@toon-format/toon');
 
 function runGit(cmd) {
   try {
@@ -84,6 +83,7 @@ function generateSummary(diffStr) {
     { regex: /^\+def (\w+)/gm, msg: "Added function" },
     { regex: /^\+class (\w+)/gm, msg: "Added class" },
     { regex: /^-def (\w+)/gm, msg: "Removed function" },
+    { regex: /^-class (\w+)/gm, msg: "Removed class" },
     { regex: /^\+.*import (.+)/gm, msg: "Added import" }
   ];
 

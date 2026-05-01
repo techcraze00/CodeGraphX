@@ -3,6 +3,7 @@ const fs = require('fs');
 const chokidar = require('chokidar');
 const { writeJSONSync, ensureDirSync, findFiles, loadConfig } = require('./utils');
 const { GraphStore } = require('./store');
+const { startServer, broadcast } = require('./server/ws-server');
 
 module.exports = function () {
   const projectRoot = process.cwd();
@@ -29,6 +30,7 @@ module.exports = function () {
       const rel = path.relative(projectRoot, filepath);
       if (res.changed) {
         console.log(`📝 Updated: ${rel} (delta: +${res.delta.symbols.added.length} -${res.delta.symbols.removed.length} ~${res.delta.symbols.modified.length} symbols)`);
+        broadcast({ type: 'delta', file: rel, delta: res.delta });
       }
     } catch (err) {
       console.error(`Failed to parse ${filepath}: ${err.message}`);
@@ -40,6 +42,7 @@ module.exports = function () {
     if (res.removed) {
       const rel = path.relative(projectRoot, filepath);
       console.log(`🗑️  Removed: ${rel}`);
+      broadcast({ type: 'delta', file: rel, delta: res.delta });
     }
   }
 
@@ -56,6 +59,9 @@ module.exports = function () {
 
   // Initial population
   console.log('👀 Watching for file changes...');
+  const wsPort = config.wsPort || 6789;
+  startServer(wsPort);
+
   let watchGlobs = (config.extensions || ['.py']).map(e => `**/*${e}`);
   watchGlobs = [...new Set(watchGlobs)];
 
@@ -74,10 +80,18 @@ module.exports = function () {
     persistent: true
   });
 
+  let writeTimeout;
+  function scheduleWrite() {
+    if (writeTimeout) clearTimeout(writeTimeout);
+    writeTimeout = setTimeout(() => {
+      writeGraph();
+    }, 300);
+  }
+
   watcher
-    .on('add',    f => { updateFile(f); writeGraph(); })
-    .on('change', f => { updateFile(f); writeGraph(); })
-    .on('unlink', f => { removeFile(f); writeGraph(); });
+    .on('add',    f => { updateFile(f); scheduleWrite(); })
+    .on('change', f => { updateFile(f); scheduleWrite(); })
+    .on('unlink', f => { removeFile(f); scheduleWrite(); });
 
   process.on('SIGINT', () => {
     console.log('\n👋 Stopping watcher.');

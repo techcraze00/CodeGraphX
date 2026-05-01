@@ -110,209 +110,10 @@ function runScan() {
      const htmlFile = path.join(outputDir, 'codegraph.html');
      // Inline the codegraph-graph.json for simplicity
      const graphData = JSON.parse(fs.readFileSync(path.join(outputDir, 'codegraph-graph.json'), 'utf8'));
-     let html = `<!DOCTYPE html>
-<html>
-<head>
-  <meta charset='utf-8'>
-  <title>CodeGraphX – Interactive Graph Dashboard (vis.js)</title>
-  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-  <link href="https://unpkg.com/vis-network/styles/vis-network.min.css" rel="stylesheet" type="text/css" />
-  <style>
-    body { font-family:sans-serif; background:#fafafe; margin:0; display:flex; height:100vh; }
-    .sidebar { background:#fff; min-width:280px; max-width:320px; width:21%; height:100vh; overflow-y:auto; padding:1.2em 1em 2em 1.5em; border-right:1px solid #eee; box-shadow:1px 0 6px #0001; }
-    .sidebar h2 { font-size:1.2em; margin-bottom:0.7em; color:#805ad5; }
-    .file-list { list-style: none; padding-left: 0; }
-     .file-list li {
-      margin: 0.13em 0; cursor:pointer; padding:2px 7px; border-radius:4px; font-size:15px; transition:background 0.13s;
-      display:flex; align-items:center;
-    }
-     .file-list li:hover { background: #e9e6f7; }
-     .symbol-entry {
-      margin-left:0em;
-      font-size:13px;
-      color:#757;
-      border-left:2.5px solid #efecfc; background:none;
-      padding-left:0.55em;
-    }
-     .file-entry {
-      font-size:15px;
-      color:#374174;
-      font-weight:600;
-      margin-top:0.35em;
-      border-bottom:1px solid #efefef88;
-      padding-bottom:1px;
-      transition:background 0.13s;
-    }
-     .file-entry:focus {
-      outline: 2px solid #845ad5;
-      outline-offset:0;
-    }
-     .file-entry:hover { background: #f4f1ff; }
-    main { flex:1; display:flex; flex-direction:column; height:100vh; }
-    header { flex:0 0 auto; text-align:center; padding:18px 0 0 0; background:#fafafe; font-size:1.65em; letter-spacing:0.5px; color:#805ad5; font-weight:600; }
-    #viz-graph { flex:1; margin:0; min-height:0; height:74vh; }
-    .stats { background:#f4f4fa;margin:1em 1.3em 0.2em 1.3em;border-radius:6px;padding:10px 0.8em; }
-    .legend { margin:1em 2.2em 0.2em 2.2em; color:#576; font-size:14px; }
-    .legend span { display:inline-block;width:14px;height:14px;margin:0 3px 0 7px;border-radius:3px; }
-    footer { color:#bbb; padding:3em 0 0 0; text-align:center; font-size:14px; }
-  </style>
-</head>
-<body>
-  <div class="sidebar">
-    <h2><i class="fa fa-folder"></i> File Structure</h2>
-    <ul class="file-list" id="file-list"></ul>
-  </div>
-  <main>
-    <header>CodeGraphX – Interactive Code Graph</header>
-    <div class="stats"><b>Files:</b> ${results.length}  <b>Total symbols:</b> ${results.reduce((n,f)=>n+(f.symbols?.length||0),0)} </div>
-    <div id="viz-graph"></div>
-    <div class='legend'><b>Legend:</b>
-      <span style='background:#3593ee'></span> File
-      <span style='background:#cf78e6'></span> Function
-      <span style='background:#78c091'></span> Class
-    </div>
-    <footer>CodeGraphX agent dashboard &copy; 2026</footer>
-  </main>
-  <script type="text/javascript" src="https://unpkg.com/vis-network/standalone/umd/vis-network.min.js"></script>
-  <script>
-    const graphData = __GRAPH_DATA__;
-    // Map types to vis.js colors
-    const colorMap = {file:'#3593ee',function:'#cf78e6',class:'#78c091',symbol:'#888', default:'#888'};
-    // Convert to vis style
-    const visNodes = graphData.nodes.map(n=>({
-      id:n.id,
-      label:n.id.includes('::')?n.id.split('::')[1]:(n.id.split('/').pop()||n.id),
-      title:'<b>'+n.id+'</b>' + (n.type?'<br>Type: '+n.type:''),
-      group: n.type||'symbol',
-      color: colorMap[n.type] || colorMap.default,
-      shape: n.type==='file' ? 'box' : (n.type==='class'?'diamond':'ellipse'),
-      font: {size: n.type==='file'?16:13}
-    }));
-    const visEdges = graphData.links.map(l=>({from:l.source, to:l.target, color:l.type==='CALLS'?'#90a':'#999', dashes:l.type!=='CALLS'}));
-    // Init network
-    const container = document.getElementById('viz-graph');
-    const data = { nodes: new vis.Network.DataSet(visNodes), edges: new vis.Network.DataSet(visEdges) };
-    const options = {
-      layout: { improvedLayout:true },
-      physics: { enabled:true, barnesHut:{springLength:160, avoidOverlap:0.31}, stabilization:{iterations:500} },
-      groups:{ file:{color:'#3593ee'}, function:{color:'#cf78e6'}, class:{color:'#78c091'} },
-      nodes:{ shape:'ellipse', font:{size:13} },
-      edges:{ arrows:'to', color:'#888', smooth:true },
-      interaction:{ hover:true, tooltipDelay:138, navigationButtons:true, selectable:true }
-    };
-    const network = new vis.Network(container, data, options);
-    // ----------- Sidebar (file/symbol tree) -----------
-     // --- Enhanced Sidebar with search, icons, expand/collapse ---
-     const fileList = document.getElementById('file-list');
-     // Insert search box
-     const searchInput = document.createElement('input');
-     searchInput.type = 'text';
-     searchInput.placeholder = 'Search files/symbols...';
-     searchInput.style.width = '97%';
-     searchInput.style.margin = '2px 0 10px 0';
-     searchInput.style.padding = '6px 8px';
-     searchInput.style.borderRadius = '5px';
-     searchInput.style.border = '1px solid #eee';
-     fileList.parentNode.insertBefore(searchInput, fileList);
-
-     const files = graphData.nodes.filter(n => n.type==='file');
-     function getTypeIcon(type) {
-       // FontAwesome or emoji
-       if (type==='file') return '<i class="fa fa-file-code" style="color:#3593ee"></i>';
-       if (type==='function') return '<i class="fa fa-circle-nodes" style="color:#cf78e6"></i>';
-       if (type==='class') return '<i class="fa fa-cube" style="color:#78c091"></i>';
-       return '<i class="fa fa-dot-circle" style="color:#888"></i>';
-     }
-
-     function renderSidebar(filter='') {
-       fileList.innerHTML = '';
-       files.forEach((f, fi) => {
-         if (filter && !f.id.toLowerCase().includes(filter) && !(graphData.nodes.some(sym=>sym.file===f.id && (sym.id.split('::')[1]||'').toLowerCase().includes(filter)))) return;
-         // File li (collapsible)
-         const li = document.createElement('li');
-         li.className = 'file-entry';
-         li.setAttribute('tabindex', 0);
-
-         // Chevron for collapse/expand
-         const chevron = document.createElement('span');
-         chevron.innerHTML = '<i class="fa fa-chevron-down"></i>';
-         chevron.style.marginRight = '7px';
-         chevron.style.cursor = 'pointer';
-         chevron.style.color = '#beb';
-         chevron.onclick = (e)=>{
-           e.stopPropagation();
-           const visible = symbolsUL.style.display !== 'none';
-           symbolsUL.style.display = visible ? 'none' : 'block';
-            chevron.innerHTML = '<i class="fa fa-chevron-' + (visible ? 'right' : 'down') + '"></i>';
-
-         };
-         li.appendChild(chevron);
-
-         // File icon and name
-         const fiElem = document.createElement('span');
-         fiElem.innerHTML = getTypeIcon('file') + ' ' + f.id;
-         fiElem.style.fontWeight = '600';
-         fiElem.style.marginRight = '8px';
-         li.appendChild(fiElem);
-         li.onclick = ()=> { network.selectNodes([f.id], true); network.focus(f.id, {scale:1.2, animation: {duration:400,easingFunction:'easeInOutQuad'}} ); };
-
-         // Nested symbols
-         const symbolsUL = document.createElement('ul');
-         symbolsUL.style.listStyle = 'none';
-         symbolsUL.style.marginLeft = '2.1em';
-         symbolsUL.style.padding = '0';
-
-         // Get all symbols for this file
-         (graphData.nodes.filter(n => n.file===f.id && n.type!=='file')).forEach(sym => {
-           if (filter && !(sym.id.split('::')[1]||'').toLowerCase().includes(filter) && !f.id.toLowerCase().includes(filter)) return;
-           const symLi = document.createElement('li');
-           symLi.className = 'symbol-entry';
-           symLi.style.marginBottom = '2px';
-           symLi.style.display = 'flex';
-           symLi.style.alignItems = 'center';
-           symLi.innerHTML = '<span style="font-size:13px; width:1.3em; display:inline-block;">' + getTypeIcon(sym.type) + '</span><span style="margin-left:0.4em;">' + (sym.id.split('::')[1] || sym.id) + '</span>';
-           symLi.title = sym.type||'';
-           symLi.onclick = (e)=> {
-             e.stopPropagation();
-             network.selectNodes([sym.id], true);
-             network.focus(sym.id, {scale:1.23, animation:{duration:400,easingFunction:'easeInOutQuad'}});
-           };
-           symbolsUL.appendChild(symLi);
-         });
-         li.appendChild(symbolsUL);
-         fileList.appendChild(li);
-       });
-     }
-
-     // wire up search
-     searchInput.oninput = function(){
-       renderSidebar(this.value.toLowerCase());
-     };
-     renderSidebar();
-     // Node click focuses sidebar
-     network.on('select', (params) => {
-       if(params.nodes.length===1){
-         const sel = params.nodes[0];
-         // find matching sidebar entry (file or symbol)
-         let found = null;
-         Array.from(fileList.querySelectorAll('.file-entry')).forEach(fli => {
-           if(fli.textContent.includes(sel) && sel.indexOf('::')===-1) found = fli;
-           // if symbol
-           Array.from(fli.querySelectorAll('.symbol-entry')).forEach(sli => {
-             if(sli.textContent === (sel.split('::')[1] || sel)) found = sli;
-           });
-         });
-         if(found){
-           found.scrollIntoView({behavior:'smooth', block:'center'});
-           found.style.background='#dedcff';
-           setTimeout(()=>found.style.background='', 700);
-         }
-       }
-     });
-  </script>
-</body>
-</html>`;
-html = html.replace('const graphData = __GRAPH_DATA__;', 'const graphData = ' + JSON.stringify(graphData, null, 2) + ';');
+     const { getHtml } = require('./dashboard');
+     const filesCount = results.length;
+     const symbolsCount = results.reduce((n,f)=>n+(f.symbols?.length||0),0);
+     let html = getHtml(JSON.stringify(graphData, null, 2), filesCount, symbolsCount);
 fs.writeFileSync(htmlFile, html, 'utf8');
      console.log('📊 codegraph.html dashboard written.');
    } catch (e) {
@@ -323,7 +124,10 @@ fs.writeFileSync(htmlFile, html, 'utf8');
   try {
     const { encode } = require('@toon-format/toon');
     // file_index.toon: flat index of filenames
-    const fileIndexToon = encode({ files: results.map(r => r.file) });
+    const fileIndexToon = encode({ files: results.map(r => ({
+      file: r.file,
+      summary: (r.symbols||[]).filter(s => ['class', 'function'].includes(s.type)).map(s => s.name).join(', ') || 'No main symbols'
+    })) });
     fs.writeFileSync(path.join(outputDir, 'file_index.toon'), fileIndexToon, 'utf8');
     
     // codegraph.toon: main result (files, symbols, edges)
@@ -542,7 +346,7 @@ program
 
 program
   .command('git-hook <action>')
-  .description('Install/remove a pre-commit hook to auto-run codegraphx scan')
+  .description('Install/remove post-commit and pre-push hooks to auto-run codegraphx scan')
   .action((action) => {
     const fs = require('fs');
     const path = require('path');
@@ -550,18 +354,23 @@ program
       console.error(`Unknown action: ${action}. Use "install" or "remove".`);
       process.exit(1);
     }
-    const hookPath = path.join(process.cwd(), '.git', 'hooks', 'pre-commit');
+    const hooks = ['post-commit', 'pre-push'];
+    const hookScript = `#!/bin/sh\ncommand -v codegraphx > /dev/null && codegraphx scan\n`;
+    
     if (action === 'install') {
-      const hook = `#!/bin/sh\ncommand -v codegraphx > /dev/null && codegraphx scan\n`;
-      fs.writeFileSync(hookPath, hook, { mode: 0o755 });
-      console.log('✅ Pre-commit hook installed (runs codegraphx scan).');
+      hooks.forEach(hook => {
+        const hookPath = path.join(process.cwd(), '.git', 'hooks', hook);
+        fs.writeFileSync(hookPath, hookScript, { mode: 0o755 });
+      });
+      console.log('✅ post-commit and pre-push hooks installed (runs codegraphx scan).');
     } else if (action === 'remove') {
-      if (fs.existsSync(hookPath)) {
-        fs.unlinkSync(hookPath);
-        console.log('✅ Pre-commit hook removed.');
-      } else {
-        console.log('No pre-commit hook to remove.');
-      }
+      hooks.forEach(hook => {
+        const hookPath = path.join(process.cwd(), '.git', 'hooks', hook);
+        if (fs.existsSync(hookPath)) {
+          fs.unlinkSync(hookPath);
+        }
+      });
+      console.log('✅ post-commit and pre-push hooks removed.');
     }
   });
 
@@ -592,8 +401,8 @@ program
   .command('diff <branch_a> <branch_b>')
   .description('Output AST delta between two branches')
   .action((branchA, branchB) => {
-    const { execSync } = require('child_process');
-    const diffStr = execSync(`git diff ${branchA} ${branchB} --unified=0`, { encoding: 'utf8' }).trim();
+    const { execFileSync } = require('child_process');
+    const diffStr = execFileSync('git', ['diff', branchA, branchB, '--unified=0'], { encoding: 'utf8' }).trim();
     if (!diffStr) {
       console.log('No differences.');
       return;
@@ -619,7 +428,3 @@ program
   });
 
 program.parse(process.argv);
-
-
-
-

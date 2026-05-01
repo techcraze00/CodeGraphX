@@ -37,5 +37,8 @@ import_test.py
 live_test.py
 mf.html
 mf.js
+check-ast.js
+check-ast2.js
+patch.js
 .gemini/
 .ruff_cache/

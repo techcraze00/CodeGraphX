@@ -4,7 +4,7 @@ const Python = require('tree-sitter-python');
 const JavaScript = require('tree-sitter-javascript');
 const TypeScript = require('tree-sitter-typescript').typescript;
 const HTML = require('tree-sitter-html');
-// const CSS = require('tree-sitter-css'); // Temporarily disabled due to ESM-compatibility issues
+const CSS = require('tree-sitter-css');
 
 const EXT_LANG = {
   '.py':   {lang: Python,    type: 'python'},
@@ -13,7 +13,7 @@ const EXT_LANG = {
   '.ts':   {lang: TypeScript, type: 'typescript'},
   '.tsx':  {lang: TypeScript, type: 'tsx'},
   '.html': {lang: HTML,       type: 'html'},
-  
+  '.css':  {lang: CSS,        type: 'css'},
 };
 
 function detectLanguage(file) {

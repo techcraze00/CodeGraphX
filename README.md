@@ -6,33 +6,39 @@ Its core purpose is to solve the problem of AI agents having to constantly re-sc
 
 ## Architecture
 
-- **File Watcher:** Detects file modifications (`chokidar`).
+- **File Watcher:** Detects file modifications (`chokidar`) with debouncing for performance.
 - **Incremental Parser:** Re-parses changed files using `tree-sitter`.
 - **Virtual Graph Engine:** Computes deltas between the old and new AST to patch the graph efficiently (O(k) updates).
-- **Session & Git Intelligence:** Links AST changes with git diffs to track exact functions/classes modified per session. 
-- **Persisted Store:** Saves the graph into flat files in the `.codegraphx/` directory.
+- **Session & Git Intelligence:** Links AST changes with git diffs to track exactly which functions/classes were modified per session.
+- **Live Dashboard:** Real-time, interactive D3.js visualization of your codebase powered by a WebSocket server.
+- **Git Hooks Integration:** Automatically runs `codegraphx scan` via `post-commit` and `pre-push` hooks.
+- **Persisted Store:** Saves the graph into flat, token-optimized files in the `.codegraphx/` directory.
 
 ## Installation
 
 **Node.js / Python (Mixed Environment):**
-\`\`\`bash
+```bash
 npm install
 pip install -e .
-\`\`\`
+```
 
 ## CLI Usage
 
-- \`codegraphx init\`: Parses the codebase and generates the initial graph.
-- \`codegraphx watch\`: Starts the file watcher for real-time live graph updates.
-- \`codegraphx scan\`: Manually triggers a re-scan.
-- \`codegraphx session summary\`: Outputs structural summary of changes for agent integration.
-- \`codegraphx diff <branch_a> <branch_b>\`: Outputs AST delta between branches.
-- \`codegraphx dashboard\`: Opens the live HTML graph visualization in the browser.
-- \`codegraphx stats\`: Prints graph statistics.
+- `codegraphx init`: Parses the codebase and generates the initial graph inside `.codegraphx/`.
+- `codegraphx watch`: Starts the file watcher and WebSocket server for real-time live graph updates.
+- `codegraphx scan`: Manually triggers a re-scan.
+- `codegraphx session summary`: Outputs a structural summary of changes in the current session/commit.
+- `codegraphx diff <branch_a> <branch_b>`: Outputs the AST delta between two branches.
+- `codegraphx query <symbol>`: Show details (files, edges, calls, called_by) for a specific symbol.
+- `codegraphx impact <symbol>`: Trace all symbols directly or indirectly impacted by a given symbol.
+- `codegraphx git-hook <install|remove>`: Install or remove `post-commit` and `pre-push` git hooks to auto-update the graph.
+- `codegraphx dashboard`: Opens the live interactive HTML graph visualization in your default browser.
+- `codegraphx stats`: Prints graph statistics (files, symbols, edges).
 
 ## Agent Workflow
 
-CodeGraphX generates a \`GEMINI.md\` file so coding agents can seamlessly read:
-1. \`.codegraphx/file_index.toon\` for a one-liner file summary.
-2. \`.codegraphx/CHANGELOG.toon\` for session/commit diffs.
-3. \`.codegraphx/codegraph.toon\` for dependency and impact analysis.
+CodeGraphX generates a `GEMINI.md` file so coding agents can seamlessly read:
+1. `.codegraphx/file_index.toon`: A one-liner file and symbol summary to orient the agent.
+2. `.codegraphx/CHANGELOG.toon`: For session/commit diffs and history.
+3. `.codegraphx/codegraph.toon`: For full dependency and impact analysis.
+4. `.codegraphx/symbols.bloom`: For O(1) symbol lookup.
