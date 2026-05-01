@@ -46,6 +46,7 @@ class CodeGraphXServer {
   }
 
   async initialize() {
+    // NOTE: Informational logs use console.error because stdout is reserved for JSON-RPC
     console.error("[CodeGraphX] Initializing MCP Server...");
     
     // Load files from store
@@ -183,12 +184,16 @@ class CodeGraphXServer {
         const symbolCount = this.graph.files.reduce((n, f) => n + (f.symbols?.length || 0), 0);
         const edgeCount = this.graph.edges.length;
 
+        const outputDir = path.join(this.projectRoot, this.config.outputDir);
+        const codebasePath = path.join(outputDir, this.config.outputFile);
+        const initialized = fileCount > 0 && fs.existsSync(codebasePath);
+
         return {
           content: [
             {
               type: "text",
               text: JSON.stringify({
-                initialized: true,
+                initialized,
                 fileCount,
                 symbolCount,
                 edgeCount,
@@ -353,9 +358,17 @@ class CodeGraphXServer {
           
           if (!node) continue;
 
-          const neighbors = direction === "downstream" ? 
+          const rawNeighbors = direction === "downstream" ? 
             (node.symbol.calls || []) : 
             (node.symbol.called_by || []);
+
+          const neighbors = direction === "downstream" ? rawNeighbors.map(calleeName => {
+            // Resolve bare name to fully-qualified ID using edges
+            const edge = this.graph.edges.find(e => 
+              e.from === node.id && e.to.endsWith(`::${calleeName}`)
+            );
+            return edge ? edge.to : calleeName; // fallback to bare if unresolvable
+          }) : rawNeighbors;
 
           results.push({
             id: node.id,

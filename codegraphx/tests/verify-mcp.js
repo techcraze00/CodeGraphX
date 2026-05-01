@@ -9,23 +9,36 @@ function sendRequest(mcpProcess, request) {
     const requestId = request.id;
     const onData = (data) => {
       buffer += data.toString();
-      // MCP Stdio transport usually sends each message as a single line or follows JSON-RPC framing
-      // We'll try to find the complete JSON object that matches our ID
-      const messages = buffer.split('\n');
-      for (let i = 0; i < messages.length; i++) {
-        if (!messages[i].trim()) continue;
+
+      // MCP Stdio transport uses newline-delimited JSON.
+      // We split by newline and process each complete line.
+      const lines = buffer.split('\n');
+      buffer = lines.pop(); // The last element is either an empty string (if ended with \n) or a partial line.
+
+      for (const line of lines) {
+        if (!line.trim()) continue;
         try {
-          const response = JSON.parse(messages[i]);
+          const response = JSON.parse(line);
           if (response.id === requestId) {
-            // Remove the processed messages from buffer
-            buffer = messages.slice(i + 1).join('\n');
             mcpProcess.stdout.removeListener('data', onData);
             resolve(response);
             return;
           }
-        } catch (e) {
-          // Not valid JSON or incomplete, continue
-        }
+        } catch (e) {}
+      }
+
+      // Fallback: If the remaining buffer is a valid JSON object with the right ID,
+      // it might be a message that wasn't newline-terminated.
+      if (buffer.trim().startsWith('{') && buffer.trim().endsWith('}')) {
+        try {
+          const response = JSON.parse(buffer);
+          if (response.id === requestId) {
+            buffer = '';
+            mcpProcess.stdout.removeListener('data', onData);
+            resolve(response);
+            return;
+          }
+        } catch (e) {}
       }
     };
     mcpProcess.stdout.on('data', onData);
@@ -44,7 +57,7 @@ async function verify() {
   
   // Use node to run the script directly to avoid permission issues with the bin script
   const mcpProcess = spawn('node', [MCP_SERVER_PATH], {
-    cwd: path.join(__dirname, '..'),
+    cwd: path.join(__dirname, '../..'),
     env: { ...process.env, NODE_ENV: 'test' }
   });
 
@@ -138,6 +151,31 @@ async function verify() {
     }
     console.log('get_graph_status response:', callResponse.result.content[0].text);
     console.log('✅ get_graph_status call verified.');
+
+    // 4. Verify trace_impact
+    console.log('Verifying call trace_impact...');
+    const traceRequest = {
+      jsonrpc: '2.0',
+      id: 4,
+      method: 'tools/call',
+      params: {
+        name: 'trace_impact',
+        arguments: {
+          symbol: 'test.py::my_new_function',
+          direction: 'downstream'
+        }
+      }
+    };
+    const traceResponse = await sendRequest(mcpProcess, traceRequest);
+    if (traceResponse.error) {
+      throw new Error(`call trace_impact error: ${JSON.stringify(traceResponse.error)}`);
+    }
+    const impactData = JSON.parse(traceResponse.result.content[0].text);
+    console.log('trace_impact response received.');
+    if (impactData.impactGraph.length < 2) {
+      throw new Error(`trace_impact failed to find children. Found: ${impactData.impactGraph.length}`);
+    }
+    console.log('✅ trace_impact call verified.');
 
     console.log('\nVerification SUCCESSFUL!');
     process.exit(0);

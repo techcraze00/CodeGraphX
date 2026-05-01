@@ -51,3 +51,8 @@ While agents can read the `.toon` files directly, an **MCP (Model Context Protoc
 - **Zero-Scan Impact Analysis:** The agent can query the graph directly ("What breaks if I change X?") instead of running multiple `grep` searches.
 - **Symbol Discovery:** High-speed lookup using the Bloom filter via structured tool calls.
 - **Context Efficiency:** The server only sends the *relevant* parts of the graph back to the agent, keeping the conversation fast and focused.
+
+---
+### My next steps:
+
+My assumption is that this project implementation is production-ready. The next natural step for the project would be publishing to npm and writing the MCP server configuration snippet for claude_desktop_config.json and the Gemini CLI equivalent, so users know exactly how to wire up cgx-mcp in their agent configs. That's the last mile between working code and something developers can actually discover and use.
