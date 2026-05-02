@@ -90,11 +90,16 @@ module.exports = async function () {
     }, 300);
   }
 
-  watcher
-    .on('add',    f => { updateFile(f); scheduleWrite(); })
-    .on('change', f => { updateFile(f); scheduleWrite(); })
-    .on('unlink', f => { removeFile(f); scheduleWrite(); });
+  // watcher
+  //   .on('add',    f => { updateFile(f); scheduleWrite(); })
+  //   .on('change', f => { updateFile(f); scheduleWrite(); })
+  //   .on('unlink', f => { removeFile(f); scheduleWrite(); });
 
+  watcher
+  .on('add',    async f => { await updateFile(f); scheduleWrite(); })
+  .on('change', async f => { await updateFile(f); scheduleWrite(); })
+  .on('unlink', f => { removeFile(f); scheduleWrite(); })
+  
   process.on('SIGINT', () => {
     console.log('\n👋 Stopping watcher.');
     watcher.close();

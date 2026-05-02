@@ -13,35 +13,16 @@ async function runScan() {
   const { findFiles, writeJSONSync, ensureDirSync, loadConfig } = require('./utils');
   const { GraphStore } = require('./store');
   const projectRoot = process.cwd();
-  const config = loadConfig(projectRoot);
-  const outputDir = path.join(projectRoot, config.outputDir);
-  const outputFile = path.join(outputDir, config.outputFile);
-  
-  ensureDirSync(outputDir);
-  console.log('🔍 Scanning for files:', config.extensions.join(', '));
-  
-  let pyFiles = [];
-  config.extensions.forEach(ext => {
-    pyFiles.push(...findFiles(projectRoot, ext));
-  });
 
-  // Auto-generate .codegraphxrc if it doesn't exist
+  // Step 1: Auto-generate .codegraphxrc FIRST if it doesn't exist
+  // so that loadConfig picks it up immediately on the next line
   const rcPath = path.join(projectRoot, '.codegraphxrc');
-    if (!fs.existsSync(rcPath)) {
-      const defaultConfig = {
-        ignore: [
-        ".git",
-        "node_modules", 
-        "__pycache__",
-        ".venv",
-        "venv",
-        "dist",
-        "build",
-        ".next",
-        "coverage",
-        ".codegraphx",
-        "*.pyc",
-        "*.egg-info"
+  if (!fs.existsSync(rcPath)) {
+    const defaultConfig = {
+      ignore: [
+        ".git", "node_modules", "__pycache__", ".venv", "venv",
+        "dist", "build", ".next", "coverage", ".codegraphx",
+        "*.pyc", "*.egg-info"
       ],
       outputDir: ".codegraphx",
       outputFile: "codebase.json",
@@ -54,15 +35,21 @@ async function runScan() {
       console.warn('Could not write .codegraphxrc:', e.message);
     }
   }
-  
-  // const ignoreMatchers = (config.ignore || []).map(name => name.toLowerCase());
-  // pyFiles = pyFiles.filter(f =>
-  //   !ignoreMatchers.some(pattern => {
-  //     if (pattern.startsWith('*.')) return f.toLowerCase().endsWith(pattern.slice(1));
-  //     const parts = f.split(path.sep);
-  //     return parts.some(part => part.toLowerCase() === pattern);
-  //   })
-  // );
+
+  // Step 2: NOW load config — picks up the freshly written .codegraphxrc
+  const config = loadConfig(projectRoot);
+  const outputDir = path.join(projectRoot, config.outputDir);
+  const outputFile = path.join(outputDir, config.outputFile);
+
+  ensureDirSync(outputDir);
+  console.log('🔍 Scanning for files:', config.extensions.join(', '));
+
+  // Step 3: Pass ignoreList into findFiles
+  const ignoreList = config.ignore || [];
+  let pyFiles = [];
+  config.extensions.forEach(ext => {
+    pyFiles.push(...findFiles(projectRoot, ext, [], ignoreList));
+  });
   
   console.log(`Found ${pyFiles.length} file(s).`);
   

@@ -1,3 +1,6 @@
+const { parseFile } = require('./parser');
+const { extractPython, extractJS, extractTS, extractHTML, extractCSS } = require('./graph');
+
 function extractEntities(file, contents) {
   try {
     const { tree, type, error } = parseFile(file, contents);
@@ -8,7 +11,7 @@ function extractEntities(file, contents) {
     }
 
     // Check for tree-sitter error nodes indicating invalid syntax
-    if (tree.rootNode.hasError()) {
+    if (tree.rootNode.hasError) {
       console.warn(`[CodeGraphX] Syntax errors in ${file}, partial parse only`);
       // Still attempt extraction — partial results are better than none
     }
@@ -28,4 +31,4 @@ function extractEntities(file, contents) {
     console.warn(`[CodeGraphX] Failed to extract entities from ${file}: ${e.message}`);
     return { symbols: [], imports: [], parseError: e.message };
   }
-}
+}module.exports = { extractEntities };
