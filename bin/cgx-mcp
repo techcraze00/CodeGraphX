@@ -1,0 +1,16 @@
+#!/usr/bin/env node
+/**
+ * CodeGraphX MCP Server Entry Point
+ */
+const { CodeGraphXServer } = require('../src/server/mcp-server.js');
+
+const server = new CodeGraphXServer();
+server.initialize().then(() => {
+  server.run().catch((error) => {
+    console.error("Server error:", error);
+    process.exit(1);
+  });
+}).catch((error) => {
+  console.error("Initialization error:", error);
+  process.exit(1);
+});

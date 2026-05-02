@@ -1,0 +1,14 @@
+# Cache and local data
+.codegraphx/
+
+# Python artifacts
+codegraphx.egg-info/
+__pycache__/
+*.pyc
+
+# Tests and demos
+test/
+tests/
+demo.py
+live_test.py
+GEMINI.md
