@@ -1,4 +1,12 @@
-# CodeGraphX
+<h1 align="center">CodeGraphX</h1>
+
+---
+
+<p align="center">
+  <img src="assets/Banner.png" alt="CodeGraphX Banner" width="100%">
+</p>
+
+<!-- # CodeGraphX\ -->
 
 A local, token-efficient, dynamic codebase graph system designed specifically for AI coding agents (like Gemini CLI, Claude Code, Cursor) and human developers.
 
