@@ -1,42 +1,48 @@
-// Multi-language parser router for CodeGraphX using web-tree-sitter (WASM)
-const path = require('path');
-const Parser = require('web-tree-sitter');
+const Parser = require('tree-sitter');
+const Python = require('tree-sitter-python');
+const JavaScript = require('tree-sitter-javascript');
+const TypeScript = require('tree-sitter-typescript').typescript;
+const HTML = require('tree-sitter-html');
+const CSS = require('tree-sitter-css');
 
 const EXT_LANG = {
-  '.py':   {wasm: 'tree-sitter-python.wasm', type: 'python'},
-  '.js':   {wasm: 'tree-sitter-javascript.wasm', type: 'javascript'},
-  '.jsx':  {wasm: 'tree-sitter-javascript.wasm', type: 'jsx'},
-  '.ts':   {wasm: 'tree-sitter-typescript.wasm', type: 'typescript'},
-  '.tsx':  {wasm: 'tree-sitter-tsx.wasm', type: 'tsx'},
-  '.html': {wasm: 'tree-sitter-html.wasm', type: 'html'},
-  '.css':  {wasm: 'tree-sitter-css.wasm', type: 'css'},
+  '.py':   { lang: Python,     type: 'python' },
+  '.js':   { lang: JavaScript, type: 'javascript' },
+  '.jsx':  { lang: JavaScript, type: 'jsx' },
+  '.ts':   { lang: TypeScript, type: 'typescript' },
+  '.tsx':  { lang: TypeScript, type: 'tsx' },
+  '.html': { lang: HTML,       type: 'html' },
+  '.css':  { lang: CSS,        type: 'css' },
 };
 
-function detectLanguage(file) {
-  const ext = file.slice(file.lastIndexOf('.'));
-  return EXT_LANG[ext.toLowerCase()] || EXT_LANG['.py']; // fallback for legacy
+// Singleton parsers — one per language, created once, reused forever
+const parsers = new Map();
+
+function getParser(lang) {
+  if (!parsers.has(lang)) {
+    const p = new Parser();
+    p.setLanguage(lang);
+    parsers.set(lang, p);
+  }
+  return parsers.get(lang);
 }
 
-let isInitialized = false;
-const loadedLanguages = {};
+function detectLanguage(file) {
+  const ext = file.slice(file.lastIndexOf('.')).toLowerCase();
+  return EXT_LANG[ext] || EXT_LANG['.py'];
+}
 
-async function parseFile(file, contents) {
-  if (!isInitialized) {
-    await Parser.init();
-    isInitialized = true;
+function parseFile(file, contents) {
+  const { lang, type } = detectLanguage(file);
+  
+  try {
+    const parser = getParser(lang);
+    const tree = parser.parse(contents);
+    return { tree, type };
+  } catch (e) {
+    // Return null tree on parse failure so caller can handle gracefully
+    return { tree: null, type, error: e.message };
   }
-  
-  const { wasm, type } = detectLanguage(file);
-  
-  if (!loadedLanguages[wasm]) {
-    const wasmPath = path.join(path.dirname(require.resolve('tree-sitter-wasms/package.json')), 'out', wasm);
-    loadedLanguages[wasm] = await Parser.Language.load(wasmPath);
-  }
-  
-  const parser = new Parser();
-  parser.setLanguage(loadedLanguages[wasm]);
-  const tree = parser.parse(contents);
-  return { tree, type };
 }
 
 module.exports = { parseFile, detectLanguage };

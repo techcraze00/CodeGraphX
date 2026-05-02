@@ -24,15 +24,45 @@ async function runScan() {
   config.extensions.forEach(ext => {
     pyFiles.push(...findFiles(projectRoot, ext));
   });
+
+  // Auto-generate .codegraphxrc if it doesn't exist
+  const rcPath = path.join(projectRoot, '.codegraphxrc');
+    if (!fs.existsSync(rcPath)) {
+      const defaultConfig = {
+        ignore: [
+        ".git",
+        "node_modules", 
+        "__pycache__",
+        ".venv",
+        "venv",
+        "dist",
+        "build",
+        ".next",
+        "coverage",
+        ".codegraphx",
+        "*.pyc",
+        "*.egg-info"
+      ],
+      outputDir: ".codegraphx",
+      outputFile: "codebase.json",
+      extensions: [".py", ".js", ".ts", ".jsx", ".tsx"]
+    };
+    try {
+      fs.writeFileSync(rcPath, JSON.stringify(defaultConfig, null, 2), 'utf8');
+      console.log('⚙️  .codegraphxrc generated with sensible defaults.');
+    } catch(e) {
+      console.warn('Could not write .codegraphxrc:', e.message);
+    }
+  }
   
-  const ignoreMatchers = (config.ignore || []).map(name => name.toLowerCase());
-  pyFiles = pyFiles.filter(f =>
-    !ignoreMatchers.some(pattern => {
-      if (pattern.startsWith('*.')) return f.toLowerCase().endsWith(pattern.slice(1));
-      const parts = f.split(path.sep);
-      return parts.some(part => part.toLowerCase() === pattern);
-    })
-  );
+  // const ignoreMatchers = (config.ignore || []).map(name => name.toLowerCase());
+  // pyFiles = pyFiles.filter(f =>
+  //   !ignoreMatchers.some(pattern => {
+  //     if (pattern.startsWith('*.')) return f.toLowerCase().endsWith(pattern.slice(1));
+  //     const parts = f.split(path.sep);
+  //     return parts.some(part => part.toLowerCase() === pattern);
+  //   })
+  // );
   
   console.log(`Found ${pyFiles.length} file(s).`);
   
@@ -185,6 +215,22 @@ Full graph with all calls and relationships. Look at \`called_by\` for impact an
 ## Project Stats
 - Files: ${results.length}
 - Symbols: ${results.reduce((n, f) => n + (f.symbols?.length||0), 0)}
+
+## MCP Server Configuration
+If your agent supports MCP, add this to your .gemini/mcp.json:
+\`\`\`json
+{
+  "mcpServers": {
+    "codegraphx": {
+      "command": "npx",
+      "args": ["cgx-mcp"],
+      "cwd": "${projectRoot}"
+    }
+  }
+}
+\`\`\`
+The cwd is pre-filled with this project's absolute path.
+Run \`npx codegraphx init\` before starting any agent session.
 `;
     try {
       fs.writeFileSync(geminiMdPath, mdContent, 'utf8');

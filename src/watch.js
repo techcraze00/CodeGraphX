@@ -69,7 +69,7 @@ module.exports = async function () {
   for (const ext of config.extensions || ['.py']) {
     allFiles.push(...findFiles(projectRoot, ext));
   }
-  allFiles = allFiles.filter(f => !isIgnored(f));
+  // allFiles = allFiles.filter(f => !isIgnored(f));
   for (const f of allFiles) {
     await updateFile(f);
   }
