@@ -1,19 +1,15 @@
-// Multi-language parser router for CodeGraphX
-const Parser = require('tree-sitter');
-const Python = require('tree-sitter-python');
-const JavaScript = require('tree-sitter-javascript');
-const TypeScript = require('tree-sitter-typescript').typescript;
-const HTML = require('tree-sitter-html');
-const CSS = require('tree-sitter-css');
+// Multi-language parser router for CodeGraphX using web-tree-sitter (WASM)
+const path = require('path');
+const Parser = require('web-tree-sitter');
 
 const EXT_LANG = {
-  '.py':   {lang: Python,    type: 'python'},
-  '.js':   {lang: JavaScript, type: 'javascript'},
-  '.jsx':  {lang: JavaScript, type: 'jsx'},
-  '.ts':   {lang: TypeScript, type: 'typescript'},
-  '.tsx':  {lang: TypeScript, type: 'tsx'},
-  '.html': {lang: HTML,       type: 'html'},
-  '.css':  {lang: CSS,        type: 'css'},
+  '.py':   {wasm: 'tree-sitter-python.wasm', type: 'python'},
+  '.js':   {wasm: 'tree-sitter-javascript.wasm', type: 'javascript'},
+  '.jsx':  {wasm: 'tree-sitter-javascript.wasm', type: 'jsx'},
+  '.ts':   {wasm: 'tree-sitter-typescript.wasm', type: 'typescript'},
+  '.tsx':  {wasm: 'tree-sitter-tsx.wasm', type: 'tsx'},
+  '.html': {wasm: 'tree-sitter-html.wasm', type: 'html'},
+  '.css':  {wasm: 'tree-sitter-css.wasm', type: 'css'},
 };
 
 function detectLanguage(file) {
@@ -21,10 +17,24 @@ function detectLanguage(file) {
   return EXT_LANG[ext.toLowerCase()] || EXT_LANG['.py']; // fallback for legacy
 }
 
-function parseFile(file, contents) {
-  const { lang, type } = detectLanguage(file);
+let isInitialized = false;
+const loadedLanguages = {};
+
+async function parseFile(file, contents) {
+  if (!isInitialized) {
+    await Parser.init();
+    isInitialized = true;
+  }
+  
+  const { wasm, type } = detectLanguage(file);
+  
+  if (!loadedLanguages[wasm]) {
+    const wasmPath = path.join(path.dirname(require.resolve('tree-sitter-wasms/package.json')), 'out', wasm);
+    loadedLanguages[wasm] = await Parser.Language.load(wasmPath);
+  }
+  
   const parser = new Parser();
-  parser.setLanguage(lang);
+  parser.setLanguage(loadedLanguages[wasm]);
   const tree = parser.parse(contents);
   return { tree, type };
 }

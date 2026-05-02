@@ -181,7 +181,7 @@ describe('CodeGraphXServer', () => {
     const data = JSON.parse(result.content[0].text);
     expect(data.startSymbol).toBe('src/main.js::start');
     expect(data.impactGraph).toHaveLength(2); // start and helper
-    expect(data.impactGraph[0].calls).toContain('helper');
+    expect(data.impactGraph[0].calls).toContain('src/utils.js::helper');
   });
 
   test('trace_impact upstream', async () => {

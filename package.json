@@ -21,8 +21,8 @@
     "bloom-filters": "^3.0.4",
     "chokidar": "^5.0.0",
     "commander": "^14.0.3",
-    "tree-sitter": "^0.25.0",
-    "tree-sitter-python": "^0.25.0",
+    "tree-sitter-wasms": "^0.1.13",
+    "web-tree-sitter": "^0.22.6",
     "ws": "^8.20.0"
   }
 }

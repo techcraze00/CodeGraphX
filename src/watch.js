@@ -5,7 +5,7 @@ const { writeJSONSync, ensureDirSync, findFiles, loadConfig } = require('./utils
 const { GraphStore } = require('./store');
 const { startServer, broadcast } = require('./server/ws-server');
 
-module.exports = function () {
+module.exports = async function () {
   const projectRoot = process.cwd();
   const config = loadConfig(projectRoot);
   const outputDir = path.join(projectRoot, config.outputDir);
@@ -23,10 +23,10 @@ module.exports = function () {
     });
   }
 
-  function updateFile(filepath) {
+  async function updateFile(filepath) {
     try {
       const contents = fs.readFileSync(filepath, 'utf8');
-      const res = store.updateFile(filepath, contents);
+      const res = await store.updateFile(filepath, contents);
       const rel = path.relative(projectRoot, filepath);
       if (res.changed) {
         console.log(`📝 Updated: ${rel} (delta: +${res.delta.symbols.added.length} -${res.delta.symbols.removed.length} ~${res.delta.symbols.modified.length} symbols)`);
@@ -70,7 +70,9 @@ module.exports = function () {
     allFiles.push(...findFiles(projectRoot, ext));
   }
   allFiles = allFiles.filter(f => !isIgnored(f));
-  allFiles.forEach(updateFile);
+  for (const f of allFiles) {
+    await updateFile(f);
+  }
   writeGraph();
 
   const watcher = chokidar.watch(watchGlobs, {

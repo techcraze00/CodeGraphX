@@ -2,8 +2,8 @@ const { parseFile } = require('./parser');
 const { extractPython, extractJS, extractTS, extractHTML, extractCSS } = require('./graph');
 
 // Top-level extractor that delegates by language
-function extractEntities(file, contents) {
-  const { tree, type } = parseFile(file, contents);
+async function extractEntities(file, contents) {
+  const { tree, type } = await parseFile(file, contents);
   switch (type) {
     case 'python': return extractPython(tree, contents);
     case 'javascript':

@@ -44,7 +44,7 @@ class GraphStore {
    * Updates a file in the store. 
    * Time complexity: Best case O(1) if hash matches. Worst case O(size of file) for parsing.
    */
-  updateFile(filepath, contents) {
+  async updateFile(filepath, contents) {
     const rel = path.relative(this.projectRoot, filepath);
     const newHash = computeHash(contents);
     const oldEntry = this.cache.get(rel);
@@ -54,7 +54,7 @@ class GraphStore {
       return { changed: false, entities: oldEntry.entities, delta: null };
     }
 
-    const newEntities = extractEntities(filepath, contents);
+    const newEntities = await extractEntities(filepath, contents);
     
     let delta = null;
     if (oldEntry) {

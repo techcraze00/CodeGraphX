@@ -7,7 +7,7 @@ program
   .description('CodeGraphX - Codebase graphing and analysis tool')
   .version('1.0.0');
 
-function runScan() {
+async function runScan() {
   const path = require('path');
   const fs = require('fs');
   const { findFiles, writeJSONSync, ensureDirSync, loadConfig } = require('./utils');
@@ -39,15 +39,15 @@ function runScan() {
   const store = new GraphStore(projectRoot, config);
   
   let changedFilesCount = 0;
-  pyFiles.forEach(filepath => {
+  for (const filepath of pyFiles) {
     try {
       const contents = fs.readFileSync(filepath, 'utf8');
-      const res = store.updateFile(filepath, contents);
+      const res = await store.updateFile(filepath, contents);
       if (res.changed) changedFilesCount++;
     } catch (err) {
       console.error(`Failed to parse ${filepath}:`, err.message);
     }
-  });
+  }
   
   console.log(`Parsed ${changedFilesCount} changed files (${pyFiles.length - changedFilesCount} cached).`);
   
@@ -200,12 +200,12 @@ Full graph with all calls and relationships. Look at \`called_by\` for impact an
 program
   .command('init')
   .description('Initialize the code graph project')
-  .action(() => { runScan(); });
+  .action(async () => { await runScan(); });
 
 program
   .command('scan')
   .description('One-off scan of codebase (identical to init)')
-  .action(() => { runScan(); });
+  .action(async () => { await runScan(); });
 
 program
   .command('dashboard')
@@ -256,8 +256,8 @@ program
 program
   .command('watch')
   .description('Watch Python files and auto-update graph on change')
-  .action(() => {
-    require('./watch')();
+  .action(async () => {
+    await require('./watch')();
   });
 
 program

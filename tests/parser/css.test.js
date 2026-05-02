@@ -1,9 +1,13 @@
 const { extractCSS } = require('../../src/graph');
-const Parser = require('tree-sitter');
-const CSS = require('tree-sitter-css');
+const Parser = require('web-tree-sitter');
+const path = require('path');
 
 describe('extractCSS', () => {
-  test('extracts class and id selectors', () => {
+  test('extracts class and id selectors', async () => {
+    await Parser.init();
+    const wasmPath = path.join(path.dirname(require.resolve('tree-sitter-wasms/package.json')), 'out', 'tree-sitter-css.wasm');
+    const CSS = await Parser.Language.load(wasmPath);
+    
     const parser = new Parser();
     parser.setLanguage(CSS);
     
