@@ -7,7 +7,7 @@ const {
   ReadResourceRequestSchema
 } = require("@modelcontextprotocol/sdk/types.js");
 const { GraphStore } = require("../store");
-const { loadConfig } = require("../utils");
+const { loadConfig, ensureDirSync } = require("../utils");
 const { buildCallEdges } = require("../edgebuilder");
 const fs = require("fs");
 const path = require("path");
@@ -54,28 +54,94 @@ class CodeGraphXServer {
     });
   }
 
+  // async initialize() {
+  //   log("Initializing MCP Server...");
+
+  //   this.graph.files = this.store.getFilesData();
+  //   this.graph.edges = buildCallEdges(this.graph.files);
+
+  //   const outputDir    = path.join(this.projectRoot, this.config.outputDir);
+  //   const codebasePath = path.join(outputDir, this.config.outputFile);
+
+  //   if (fs.existsSync(codebasePath)) {
+  //     try {
+  //       const data = JSON.parse(fs.readFileSync(codebasePath, "utf8"));
+  //       this.graph.generatedAt = data.generatedAt;
+  //     } catch (e) {
+  //       warn("Could not read generatedAt from codebase.json:", e.message);
+  //     }
+  //   }
+  //   if (!this.graph.generatedAt) {
+  //     this.graph.generatedAt = new Date().toISOString();
+  //   }
+
+  //   // Mark graph as ready only when we actually have data
+  //   this.graphReady = this.graph.files.length > 0;
+
+  //   if (!this.graphReady) {
+  //     warn("No files loaded — graph is empty.");
+  //     warn("Run `codegraphx scan` in the project root, then restart Gemini CLI.");
+  //   }
+
+  //   // Load Bloom Filter
+  //   const bloomPath = path.join(outputDir, "symbols.bloom");
+  //   if (fs.existsSync(bloomPath)) {
+  //     try {
+  //       const bloomData = JSON.parse(fs.readFileSync(bloomPath, "utf8"));
+  //       this.bloom = BloomFilter.fromJSON(bloomData);
+  //       log("Bloom filter loaded.");
+  //     } catch (e) {
+  //       warn("Failed to load Bloom filter:", e.message);
+  //     }
+  //   }
+
+  //   log(`Loaded ${this.graph.files.length} files and ${this.graph.edges.length} edges.`);
+  // }
+
+  // In src/server/mcp-server.js, replace the initialize() method:
+
   async initialize() {
     log("Initializing MCP Server...");
 
+    // Try to load existing graph data first
     this.graph.files = this.store.getFilesData();
-    this.graph.edges = buildCallEdges(this.graph.files);
-
-    const outputDir    = path.join(this.projectRoot, this.config.outputDir);
+    
+    const outputDir = path.join(this.projectRoot, this.config.outputDir);
     const codebasePath = path.join(outputDir, this.config.outputFile);
 
-    if (fs.existsSync(codebasePath)) {
+    // Check if we have valid cached data
+    const hasCache = this.graph.files.length > 0 && fs.existsSync(codebasePath);
+    
+    if (hasCache) {
+      // Load edges and metadata from cache
+      this.graph.edges = buildCallEdges(this.graph.files);
       try {
         const data = JSON.parse(fs.readFileSync(codebasePath, "utf8"));
         this.graph.generatedAt = data.generatedAt;
       } catch (e) {
         warn("Could not read generatedAt from codebase.json:", e.message);
       }
+    } else {
+      // === AUTO-HEAL: Graph empty or missing, trigger scan ===
+      warn("Graph not initialized or empty. Running auto-scan...");
+      try {
+        const { runScan } = require("../scanner");
+        const scanned = await runScan(this.projectRoot, this.config, true); // mcpMode=true for fast startup
+        this.graph.files = scanned.files;
+        this.graph.edges = scanned.edges;
+        this.graph.generatedAt = scanned.generatedAt;
+        log(`Auto-scan complete: ${this.graph.files.length} files, ${this.graph.edges.length} edges.`);
+      } catch (scanError) {
+        warn("Auto-scan failed:", scanError.message);
+        warn("Graph will remain empty. Run 'codegraphx scan' manually for full features.");
+      }
     }
+    
     if (!this.graph.generatedAt) {
       this.graph.generatedAt = new Date().toISOString();
     }
 
-    // Mark graph as ready only when we actually have data
+    // Mark graph as ready if we have data
     this.graphReady = this.graph.files.length > 0;
 
     if (!this.graphReady) {
@@ -83,7 +149,7 @@ class CodeGraphXServer {
       warn("Run `codegraphx scan` in the project root, then restart Gemini CLI.");
     }
 
-    // Load Bloom Filter
+    // Load Bloom Filter (or create if missing after auto-scan)
     const bloomPath = path.join(outputDir, "symbols.bloom");
     if (fs.existsSync(bloomPath)) {
       try {
@@ -93,16 +159,50 @@ class CodeGraphXServer {
       } catch (e) {
         warn("Failed to load Bloom filter:", e.message);
       }
+    } else if (this.graphReady) {
+      // Create bloom filter on-the-fly if missing but we have symbols
+      try {
+        const allSymbols = this.graph.files.flatMap(f => (f.symbols||[]).map(s => s.name).filter(Boolean));
+        if (allSymbols.length > 0) {
+          const { BloomFilter } = require("bloom-filters");
+          this.bloom = BloomFilter.from(allSymbols, 0.01);
+          // Save for next time
+          ensureDirSync(outputDir);
+          fs.writeFileSync(bloomPath, JSON.stringify(this.bloom.saveAsJSON()), "utf8");
+          log("Bloom filter created and saved.");
+        }
+      } catch (e) {
+        warn("Failed to create Bloom filter:", e.message);
+      }
     }
 
     log(`Loaded ${this.graph.files.length} files and ${this.graph.edges.length} edges.`);
   }
 
   // Helper: return a "not ready" response for tools when graph is empty
-  _notReadyResponse() {
+  // _notReadyResponse() {
+  //   return {
+  //     content: [{ type: "text", text: NO_GRAPH_MSG }],
+  //     isError: true,
+  //   };
+  // }
+    // Helper: return a "not ready" response for tools when graph is empty
+  _notReadyResponse(toolName) {
+    const hint = this.graphReady 
+      ? undefined 
+      : "Graph is initializing. If this persists, run `codegraphx scan` manually.";
+    
     return {
-      content: [{ type: "text", text: NO_GRAPH_MSG }],
-      isError: true,
+      content: [{ 
+        type: "text", 
+        text: JSON.stringify({
+          status: "initializing",
+          message: "CodeGraphX is building the code graph...",
+          hint,
+          tool: toolName
+        }, null, 2) 
+      }],
+      isError: false, // Not an error, just initializing
     };
   }
 
@@ -218,7 +318,9 @@ class CodeGraphXServer {
       }
 
       // All remaining tools require graph data
-      if (!this.graphReady) return this._notReadyResponse();
+      // if (!this.graphReady) return this._notReadyResponse();
+
+      if (!this.graphReady) return this._notReadyResponse(name);
 
       if (name === "list_files") {
         const filter = args?.filter?.toLowerCase();
