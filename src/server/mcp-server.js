@@ -13,19 +13,24 @@ const fs = require("fs");
 const path = require("path");
 const { BloomFilter } = require("bloom-filters");
 
+// ── Logging helper ───────────────────────────────────────────────────────────
+// CRITICAL: In an MCP stdio server, stdout is owned 100% by the JSON-RPC
+// transport. Every log line must go to stderr. Never use console.log here.
+const log  = (...a) => process.stderr.write('[CodeGraphX] ' + a.join(' ') + '\n');
+const warn = (...a) => process.stderr.write('[CodeGraphX] WARN ' + a.join(' ') + '\n');
+
+// Sentinel message returned by tools when no graph data is present yet,
+// instead of crashing or returning empty results that confuse Gemini.
+const NO_GRAPH_MSG =
+  'CodeGraphX graph not initialised. ' +
+  'Please run `codegraphx scan` (or `npx codegraphx scan`) in your project ' +
+  'root and then restart Gemini CLI.';
+
 class CodeGraphXServer {
   constructor() {
     this.server = new Server(
-      {
-        name: "codegraphx",
-        version: "1.0.0",
-      },
-      {
-        capabilities: {
-          tools: {},
-          resources: {},
-        },
-      }
+      { name: "codegraphx", version: "1.0.0" },
+      { capabilities: { tools: {}, resources: {} } }
     );
 
     this.projectRoot = process.cwd();
@@ -33,12 +38,16 @@ class CodeGraphXServer {
     this.store = new GraphStore(this.projectRoot, this.config);
     this.graph = { files: [], edges: [], generatedAt: null };
     this.bloom = null;
+    this.graphReady = false;
 
     this.setupTools();
     this.setupResources();
-    
-    // Error handling
-    this.server.onerror = (error) => console.error("[MCP Error]", error);
+
+    this.server.onerror = (error) => {
+      // Route MCP SDK errors to stderr, never stdout
+      process.stderr.write('[CodeGraphX] MCP Error: ' + error + '\n');
+    };
+
     process.on("SIGINT", async () => {
       await this.server.close();
       process.exit(0);
@@ -46,26 +55,32 @@ class CodeGraphXServer {
   }
 
   async initialize() {
-    // NOTE: Informational logs use console.error because stdout is reserved for JSON-RPC
-    console.error("[CodeGraphX] Initializing MCP Server...");
-    
-    // Load files from store
+    log("Initializing MCP Server...");
+
     this.graph.files = this.store.getFilesData();
-    
-    // Build edges
     this.graph.edges = buildCallEdges(this.graph.files);
-    
-    // Set generatedAt from codebase.json if exists, else now
-    const outputDir = path.join(this.projectRoot, this.config.outputDir);
+
+    const outputDir    = path.join(this.projectRoot, this.config.outputDir);
     const codebasePath = path.join(outputDir, this.config.outputFile);
+
     if (fs.existsSync(codebasePath)) {
       try {
         const data = JSON.parse(fs.readFileSync(codebasePath, "utf8"));
         this.graph.generatedAt = data.generatedAt;
-      } catch (e) {}
+      } catch (e) {
+        warn("Could not read generatedAt from codebase.json:", e.message);
+      }
     }
     if (!this.graph.generatedAt) {
       this.graph.generatedAt = new Date().toISOString();
+    }
+
+    // Mark graph as ready only when we actually have data
+    this.graphReady = this.graph.files.length > 0;
+
+    if (!this.graphReady) {
+      warn("No files loaded — graph is empty.");
+      warn("Run `codegraphx scan` in the project root, then restart Gemini CLI.");
     }
 
     // Load Bloom Filter
@@ -74,13 +89,21 @@ class CodeGraphXServer {
       try {
         const bloomData = JSON.parse(fs.readFileSync(bloomPath, "utf8"));
         this.bloom = BloomFilter.fromJSON(bloomData);
-        console.error("[CodeGraphX] Bloom filter loaded.");
+        log("Bloom filter loaded.");
       } catch (e) {
-        console.error("[CodeGraphX] Failed to load Bloom filter:", e.message);
+        warn("Failed to load Bloom filter:", e.message);
       }
     }
-    
-    console.error(`[CodeGraphX] Loaded ${this.graph.files.length} files and ${this.graph.edges.length} edges.`);
+
+    log(`Loaded ${this.graph.files.length} files and ${this.graph.edges.length} edges.`);
+  }
+
+  // Helper: return a "not ready" response for tools when graph is empty
+  _notReadyResponse() {
+    return {
+      content: [{ type: "text", text: NO_GRAPH_MSG }],
+      isError: true,
+    };
   }
 
   setupTools() {
@@ -89,10 +112,7 @@ class CodeGraphXServer {
         {
           name: "get_graph_status",
           description: "Get the current status of the CodeGraphX graph.",
-          inputSchema: {
-            type: "object",
-            properties: {},
-          },
+          inputSchema: { type: "object", properties: {} },
         },
         {
           name: "list_files",
@@ -102,7 +122,7 @@ class CodeGraphXServer {
             properties: {
               filter: {
                 type: "string",
-                description: "Optional glob or substring filter for file paths.",
+                description: "Optional substring filter for file paths.",
               },
             },
           },
@@ -115,7 +135,7 @@ class CodeGraphXServer {
             properties: {
               name: {
                 type: "string",
-                description: "The name of the symbol to query. Can be a bare name or 'file::name' for exact matching.",
+                description: "Symbol name. Use bare name or 'file::name' for exact matching.",
               },
             },
             required: ["name"],
@@ -127,10 +147,7 @@ class CodeGraphXServer {
           inputSchema: {
             type: "object",
             properties: {
-              name: {
-                type: "string",
-                description: "The name of the symbol to check.",
-              },
+              name: { type: "string", description: "The symbol name to check." },
             },
             required: ["name"],
           },
@@ -143,16 +160,15 @@ class CodeGraphXServer {
             properties: {
               symbol: {
                 type: "string",
-                description: "The symbol to trace (name or 'file::name').",
+                description: "Symbol to trace (name or 'file::name').",
               },
               direction: {
                 type: "string",
                 enum: ["upstream", "downstream"],
-                description: "The direction to trace: 'upstream' for callers, 'downstream' for callees.",
+                description: "'upstream' for callers, 'downstream' for callees.",
               },
               depth: {
                 type: "integer",
-                default: 3,
                 description: "Maximum depth to trace (default 3).",
               },
             },
@@ -167,8 +183,7 @@ class CodeGraphXServer {
             properties: {
               branch: {
                 type: "string",
-                description: "The branch or commit to diff against HEAD~1 (default: 'HEAD').",
-                default: "HEAD",
+                description: "Branch or commit to diff against HEAD~1 (default: 'HEAD').",
               },
             },
           },
@@ -180,29 +195,30 @@ class CodeGraphXServer {
       const { name, arguments: args } = request.params;
 
       if (name === "get_graph_status") {
-        const fileCount = this.graph.files.length;
+        const fileCount   = this.graph.files.length;
         const symbolCount = this.graph.files.reduce((n, f) => n + (f.symbols?.length || 0), 0);
-        const edgeCount = this.graph.edges.length;
-
-        const outputDir = path.join(this.projectRoot, this.config.outputDir);
-        const codebasePath = path.join(outputDir, this.config.outputFile);
-        const initialized = fileCount > 0 && fs.existsSync(codebasePath);
+        const edgeCount   = this.graph.edges.length;
+        const outputDir   = path.join(this.projectRoot, this.config.outputDir);
+        const initialized = fileCount > 0 && fs.existsSync(path.join(outputDir, this.config.outputFile));
 
         return {
-          content: [
-            {
-              type: "text",
-              text: JSON.stringify({
-                initialized,
-                fileCount,
-                symbolCount,
-                edgeCount,
-                lastUpdated: this.graph.generatedAt,
-              }, null, 2),
-            },
-          ],
+          content: [{
+            type: "text",
+            text: JSON.stringify({
+              initialized,
+              graphReady: this.graphReady,
+              fileCount,
+              symbolCount,
+              edgeCount,
+              lastUpdated: this.graph.generatedAt,
+              hint: initialized ? undefined : "Run `codegraphx scan` then restart Gemini CLI.",
+            }, null, 2),
+          }],
         };
       }
+
+      // All remaining tools require graph data
+      if (!this.graphReady) return this._notReadyResponse();
 
       if (name === "list_files") {
         const filter = args?.filter?.toLowerCase();
@@ -217,20 +233,13 @@ class CodeGraphXServer {
           }));
 
         return {
-          content: [
-            {
-              type: "text",
-              text: JSON.stringify(files, null, 2),
-            },
-          ],
+          content: [{ type: "text", text: JSON.stringify(files, null, 2) }],
         };
       }
 
       if (name === "query_symbol") {
         const symbolName = args?.name;
-        if (!symbolName) {
-          throw new Error("Symbol name is required");
-        }
+        if (!symbolName) throw new Error("Symbol name is required");
 
         let matches = [];
         if (symbolName.includes("::")) {
@@ -238,28 +247,19 @@ class CodeGraphXServer {
           const fileData = this.graph.files.find(f => f.file === filePath);
           if (fileData) {
             const symbol = (fileData.symbols || []).find(s => s.name === sym);
-            if (symbol) {
-              matches.push({ file: fileData.file, symbol });
-            }
+            if (symbol) matches.push({ file: fileData.file, symbol });
           }
         } else {
           this.graph.files.forEach(f => {
             (f.symbols || []).forEach(s => {
-              if (s.name === symbolName) {
-                matches.push({ file: f.file, symbol: s });
-              }
+              if (s.name === symbolName) matches.push({ file: f.file, symbol: s });
             });
           });
         }
 
         if (matches.length === 0) {
           return {
-            content: [
-              {
-                type: "text",
-                text: `No symbol named "${symbolName}" found.`,
-              },
-            ],
+            content: [{ type: "text", text: `No symbol named "${symbolName}" found.` }],
             isError: true,
           };
         }
@@ -274,63 +274,45 @@ class CodeGraphXServer {
         }));
 
         return {
-          content: [
-            {
-              type: "text",
-              text: JSON.stringify(results, null, 2),
-            },
-          ],
+          content: [{ type: "text", text: JSON.stringify(results, null, 2) }],
         };
       }
 
       if (name === "check_symbol_exists") {
         const symbolName = args?.name;
-        if (!symbolName) {
-          throw new Error("Symbol name is required");
-        }
+        if (!symbolName) throw new Error("Symbol name is required");
 
         if (!this.bloom) {
           return {
-            content: [
-              {
-                type: "text",
-                text: "Bloom filter not loaded. Cannot perform instant check.",
-              },
-            ],
+            content: [{ type: "text", text: "Bloom filter not loaded. Cannot perform instant check." }],
             isError: true,
           };
         }
 
-        const exists = this.bloom.has(symbolName);
         return {
-          content: [
-            {
-              type: "text",
-              text: JSON.stringify({
-                name: symbolName,
-                exists: exists ? "probable_yes" : "definite_no",
-              }, null, 2),
-            },
-          ],
+          content: [{
+            type: "text",
+            text: JSON.stringify({
+              name: symbolName,
+              exists: this.bloom.has(symbolName) ? "probable_yes" : "definite_no",
+            }, null, 2),
+          }],
         };
       }
 
       if (name === "trace_impact") {
         const { symbol: startSymbol, direction, depth = 3 } = args;
-        if (!startSymbol || !direction) {
-          throw new Error("Symbol and direction are required");
-        }
+        if (!startSymbol || !direction) throw new Error("Symbol and direction are required");
 
         const findSymbol = (id) => {
           let filePath, symName;
           if (id.includes("::")) {
             const parts = id.split("::");
             filePath = parts[0];
-            symName = parts[1];
+            symName  = parts[1];
           } else {
             symName = id;
           }
-
           for (const f of this.graph.files) {
             if (filePath && f.file !== filePath) continue;
             const symbol = (f.symbols || []).find(s => s.name === symName);
@@ -349,26 +331,26 @@ class CodeGraphXServer {
 
         const visited = new Set();
         const results = [];
-        const queue = [{ id: startNode.id, depth: 0 }];
+        const queue   = [{ id: startNode.id, depth: 0 }];
         visited.add(startNode.id);
 
         while (queue.length > 0) {
           const { id, depth: currentDepth } = queue.shift();
           const node = findSymbol(id);
-          
           if (!node) continue;
 
-          const rawNeighbors = direction === "downstream" ? 
-            (node.symbol.calls || []) : 
-            (node.symbol.called_by || []);
+          const rawNeighbors = direction === "downstream"
+            ? (node.symbol.calls || [])
+            : (node.symbol.called_by || []);
 
-          const neighbors = direction === "downstream" ? rawNeighbors.map(calleeName => {
-            // Resolve bare name to fully-qualified ID using edges
-            const edge = this.graph.edges.find(e => 
-              e.from === node.id && e.to.endsWith(`::${calleeName}`)
-            );
-            return edge ? edge.to : calleeName; // fallback to bare if unresolvable
-          }) : rawNeighbors;
+          const neighbors = direction === "downstream"
+            ? rawNeighbors.map(calleeName => {
+                const edge = this.graph.edges.find(
+                  e => e.from === node.id && e.to.endsWith(`::${calleeName}`)
+                );
+                return edge ? edge.to : calleeName;
+              })
+            : rawNeighbors;
 
           results.push({
             id: node.id,
@@ -388,17 +370,15 @@ class CodeGraphXServer {
         }
 
         return {
-          content: [
-            {
-              type: "text",
-              text: JSON.stringify({
-                startSymbol: startNode.id,
-                direction,
-                maxDepth: depth,
-                impactGraph: results
-              }, null, 2),
-            },
-          ],
+          content: [{
+            type: "text",
+            text: JSON.stringify({
+              startSymbol: startNode.id,
+              direction,
+              maxDepth: depth,
+              impactGraph: results
+            }, null, 2),
+          }],
         };
       }
 
@@ -415,12 +395,7 @@ class CodeGraphXServer {
         }
 
         return {
-          content: [
-            {
-              type: "text",
-              text: JSON.stringify(summary, null, 2),
-            },
-          ],
+          content: [{ type: "text", text: JSON.stringify(summary, null, 2) }],
         };
       }
 
@@ -447,34 +422,32 @@ class CodeGraphXServer {
     }));
 
     this.server.setRequestHandler(ReadResourceRequestSchema, async (request) => {
-      const uri = request.params.uri;
+      const uri       = request.params.uri;
       const outputDir = path.join(this.projectRoot, this.config.outputDir);
 
       if (uri === "codegraphx://file-index") {
-        const toonPath = path.join(outputDir, "file_index.toon");
         let content = "";
+        const toonPath = path.join(outputDir, "file_index.toon");
 
         if (fs.existsSync(toonPath)) {
           try {
             const { decode } = require("@toon-format/toon");
-            const raw = fs.readFileSync(toonPath, "utf8");
-            const decoded = decode(raw);
-            content = JSON.stringify(decoded, null, 2);
+            content = JSON.stringify(decode(fs.readFileSync(toonPath, "utf8")), null, 2);
           } catch (e) {
-            console.error("[MCP Resource] Failed to decode TOON file-index:", e.message);
+            warn("Failed to decode TOON file-index:", e.message);
           }
         }
 
         if (!content) {
-          // Fallback to codebase.json
           const codebasePath = path.join(outputDir, this.config.outputFile);
-          const customPath = path.join(outputDir, "custom_codebase.json");
-          const fallbackPath = fs.existsSync(codebasePath) ? codebasePath : (fs.existsSync(customPath) ? customPath : null);
-
-          if (fallbackPath) {
+          const customPath   = path.join(outputDir, "custom_codebase.json");
+          const fallback     = fs.existsSync(codebasePath) ? codebasePath
+                             : fs.existsSync(customPath)   ? customPath
+                             : null;
+          if (fallback) {
             try {
-              const data = JSON.parse(fs.readFileSync(fallbackPath, "utf8"));
-              const index = {
+              const data = JSON.parse(fs.readFileSync(fallback, "utf8"));
+              content = JSON.stringify({
                 files: (data.files || []).map(f => ({
                   file: f.file,
                   summary: (f.symbols || [])
@@ -482,48 +455,41 @@ class CodeGraphXServer {
                     .map(s => s.name)
                     .join(', ') || 'No main symbols'
                 }))
-              };
-              content = JSON.stringify(index, null, 2);
+              }, null, 2);
             } catch (e) {
-              console.error("[MCP Resource] Fallback failed:", e.message);
+              warn("Fallback file-index read failed:", e.message);
             }
           }
         }
 
         return {
-          contents: [
-            {
-              uri,
-              mimeType: "text/plain",
-              text: content || "File index not available."
-            }
-          ]
+          contents: [{
+            uri,
+            mimeType: "text/plain",
+            text: content || (this.graphReady ? "File index not available." : NO_GRAPH_MSG),
+          }]
         };
       }
 
       if (uri === "codegraphx://changelog") {
-        const toonPath = path.join(outputDir, "CHANGELOG.toon");
         let content = "";
+        const toonPath = path.join(outputDir, "CHANGELOG.toon");
 
         if (fs.existsSync(toonPath)) {
           try {
             const { decode } = require("@toon-format/toon");
-            const raw = fs.readFileSync(toonPath, "utf8");
-            const decoded = decode(raw);
-            content = JSON.stringify(decoded, null, 2);
+            content = JSON.stringify(decode(fs.readFileSync(toonPath, "utf8")), null, 2);
           } catch (e) {
-            console.error("[MCP Resource] Failed to decode TOON changelog:", e.message);
+            warn("Failed to decode TOON changelog:", e.message);
           }
         }
 
         return {
-          contents: [
-            {
-              uri,
-              mimeType: "text/plain",
-              text: content || "Changelog not available."
-            }
-          ]
+          contents: [{
+            uri,
+            mimeType: "text/plain",
+            text: content || "Changelog not available.",
+          }]
         };
       }
 
@@ -534,19 +500,18 @@ class CodeGraphXServer {
   async run() {
     const transport = new StdioServerTransport();
     await this.server.connect(transport);
-    console.error("CodeGraphX MCP Server running on stdio");
+    log("MCP Server running on stdio");
   }
 }
 
-// Check if this script is being run directly
 if (require.main === module) {
   const server = new CodeGraphXServer();
-  server.initialize().then(() => {
-    server.run().catch((error) => {
-      console.error("Server error:", error);
+  server.initialize()
+    .then(() => server.run())
+    .catch((error) => {
+      process.stderr.write('[CodeGraphX] Fatal: ' + error.stack + '\n');
       process.exit(1);
     });
-  });
 }
 
 module.exports = { CodeGraphXServer };

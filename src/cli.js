@@ -287,6 +287,50 @@ program
   });
 
 program
+  .command('doctor')
+  .description('Analyse the codebase graph and report missing imports, unresolved calls, and parse errors')
+  .option('--json', 'Output the report as JSON instead of pretty-printed text')
+  .option('--no-calls', 'Skip reporting unresolved call targets (reduces noise)')
+  .option('--strict', 'Exit with code 1 if any issues are found (useful in CI)')
+  .action((options) => {
+    const path = require('path');
+    const { loadConfig } = require('./utils');
+    const { GraphStore } = require('./store');
+    const { runDoctor, printReport } = require('./doctor');
+
+    const projectRoot = process.cwd();
+    const config      = loadConfig(projectRoot);
+    const store       = new GraphStore(projectRoot, config);
+    const filesData   = store.getFilesData();
+
+    if (filesData.length === 0) {
+      console.error('No graph data found. Run `codegraphx scan` first.');
+      process.exit(1);
+    }
+
+    const report = runDoctor(filesData, projectRoot);
+
+    // Optionally suppress call-target noise
+    if (options.calls === false) {
+      report.issues.unresolvedCalls  = [];
+      report.summary.unresolvedCalls = 0;
+      report.summary.totalIssues     =
+        report.summary.parseErrors + report.summary.missingImports;
+      report.summary.healthy         = report.summary.totalIssues === 0;
+    }
+
+    if (options.json) {
+      console.log(JSON.stringify(report, null, 2));
+    } else {
+      printReport(report);
+    }
+
+    if (options.strict && !report.summary.healthy) {
+      process.exit(1);
+    }
+  });
+
+program
   .command('watch')
   .description('Watch Python files and auto-update graph on change')
   .action(async () => {
