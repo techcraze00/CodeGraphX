@@ -1,7 +1,7 @@
 # CodeGraphX
 
 <p align="center">
-  <img src="assets/Banner.png" alt="CodeGraphX Banner" width="100%" />
+  <img src="assets/logo.png" alt="CodeGraphX Banner" width="30%" border-radius="50%" />
 </p>
 
 <p align="center">
