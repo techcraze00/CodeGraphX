@@ -128,4 +128,19 @@ import os as myos
       );
     });
   });
+
+  test('parseFile returns standardized File-Level Symbol Table structure', () => {
+    const { parseFile } = require('../src/parser.js');
+    const result = parseFile('test.js', 'function test() { console.log(1); }');
+    
+    expect(result).toHaveProperty('exports');
+    expect(result).toHaveProperty('imports');
+    expect(result).toHaveProperty('declaredSymbols');
+    expect(result).toHaveProperty('calls');
+    
+    expect(Array.isArray(result.exports)).toBe(true);
+    expect(Array.isArray(result.imports)).toBe(true);
+    expect(Array.isArray(result.declaredSymbols)).toBe(true);
+    expect(Array.isArray(result.calls)).toBe(true);
+  });
 });
