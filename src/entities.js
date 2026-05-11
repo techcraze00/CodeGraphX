@@ -1,14 +1,155 @@
 const { parseFile } = require('./parser');
-const { extractPython, extractJS, extractTS, extractHTML, extractCSS } = require('./graph');
+const { getAdapterForFile } = require('./languages');
+
+class SymbolEntity {
+  constructor({ id, name, type, file, scope, startPosition, calls, ontology }) {
+    this.id = id;
+    this.name = name;
+    this.type = type;
+    this.file = file;
+    this.scope = scope || 'global';
+    this.startPosition = startPosition;
+    this.calls = calls || [];
+    this.ontology = ontology || [];
+  }
+
+  toJSON() {
+    return {
+      id: this.id,
+      name: this.name,
+      type: this.type,
+      file: this.file,
+      scope: this.scope,
+      startPosition: this.startPosition,
+      calls: this.calls,
+      ontology: this.ontology
+    };
+  }
+}
+
+class FileEntity {
+  constructor({ path, file, hash, language, symbols, imports, syntaxErrors, parseError }) {
+    this.path = path || file;
+    this.file = this.path; // Compatibility alias
+    this.hash = hash;
+    this.language = language;
+    this.symbols = (symbols || []).map(s => s instanceof SymbolEntity ? s : new SymbolEntity(s));
+    this.imports = imports || [];
+    this.syntaxErrors = syntaxErrors || [];
+    this.parseError = parseError;
+  }
+
+  toJSON() {
+    return {
+      path: this.path,
+      file: this.file, // Compatibility
+      hash: this.hash,
+      language: this.language,
+      symbols: this.symbols.map(s => s.toJSON()),
+      imports: this.imports,
+      syntaxErrors: this.syntaxErrors,
+      parseError: this.parseError
+    };
+  }
+}
+
+class EdgeEntity {
+  static EDGE_TYPES = {
+    CALLS: 'CALLS',
+    IMPORTS: 'IMPORTS',
+    INHERITS: 'INHERITS',
+    IMPLEMENTS: 'IMPLEMENTS',
+    USES: 'USES',
+    REFERENCES: 'REFERENCES',
+    ROUTES_TO: 'ROUTES_TO'
+  };
+
+  constructor({ from, to, type, confidence = 1.0 }) {
+    if (!EdgeEntity.EDGE_TYPES[type]) {
+      throw new Error(`Invalid edge type: ${type}. Must be one of: ${Object.keys(EdgeEntity.EDGE_TYPES).join(', ')}`);
+    }
+    this.from = from;
+    this.to = to;
+    this.type = type;
+    this.confidence = confidence;
+  }
+
+  toJSON() {
+    return {
+      from: this.from,
+      to: this.to,
+      type: this.type,
+      confidence: this.confidence
+    };
+  }
+}
+
+class Snapshot {
+  constructor({ id, timestamp, repositoryId, commitHash, files, edges }) {
+    this.id = id;
+    this.timestamp = timestamp || Date.now();
+    this.repositoryId = repositoryId;
+    this.commitHash = commitHash;
+    this.files = (files || []).map(f => f instanceof FileEntity ? f : new FileEntity(f));
+    this.edges = (edges || []).map(e => e instanceof EdgeEntity ? e : new EdgeEntity(e));
+  }
+
+  toJSON() {
+    return {
+      id: this.id,
+      timestamp: this.timestamp,
+      repositoryId: this.repositoryId,
+      commitHash: this.commitHash,
+      files: this.files.map(f => f.toJSON()),
+      edges: this.edges.map(e => e.toJSON())
+    };
+  }
+}
+
+class Repository {
+  constructor({ id, name, path, snapshots }) {
+    this.id = id;
+    this.name = name;
+    this.path = path;
+    this.snapshots = (snapshots || []).map(s => s instanceof Snapshot ? s : new Snapshot(s));
+  }
+
+  toJSON() {
+    return {
+      id: this.id,
+      name: this.name,
+      path: this.path,
+      snapshots: this.snapshots.map(s => s.toJSON())
+    };
+  }
+}
+
+class CommitEntity {
+  constructor({ hash, author, timestamp, message, changes, branch, summary }) {
+    this.hash = hash;
+    this.author = author;
+    this.timestamp = timestamp || Date.now();
+    this.message = message;
+    this.changes = changes || { added: [], removed: [], modified: [] };
+    this.branch = branch;
+    this.summary = summary;
+  }
+
+  toJSON() {
+    return {
+      hash: this.hash,
+      author: this.author,
+      timestamp: this.timestamp,
+      message: this.message,
+      changes: this.changes,
+      branch: this.branch,
+      summary: this.summary
+    };
+  }
+}
 
 /**
  * Walk the tree-sitter CST and collect every ERROR and MISSING node.
- * Returns an array of { line, column, nodeType, context } objects.
- *
- * - line    : 1-based line number
- * - column  : 0-based column
- * - nodeType: "ERROR" or "MISSING"
- * - context : up to 40 chars of surrounding source text (trimmed)
  */
 function collectSyntaxErrors(rootNode, contents) {
   const errors = [];
@@ -20,21 +161,19 @@ function collectSyntaxErrors(rootNode, contents) {
     if (!node) continue;
 
     if (node.type === 'ERROR' || node.isMissing) {
-      const row    = node.startPosition.row;        // 0-based
-      const col    = node.startPosition.column;     // 0-based
+      const row    = node.startPosition.row;
+      const col    = node.startPosition.column;
       const line   = lines[row] || '';
-      // Grab a short context snippet centred around the error column
       const start  = Math.max(0, col - 10);
       const end    = Math.min(line.length, col + 30);
       const context = line.slice(start, end).trim();
 
       errors.push({
-        line:     row + 1,               // convert to 1-based
+        line:     row + 1,
         column:   col,
         nodeType: node.isMissing ? 'MISSING' : 'ERROR',
         context,
       });
-      // Don't descend into ERROR nodes — their children are noise
       continue;
     }
 
@@ -50,37 +189,61 @@ function extractEntities(file, contents) {
   try {
     const { tree, type, error } = parseFile(file, contents);
 
-    // Parser returned an error or null tree
     if (!tree || error) {
-      return { symbols: [], imports: [], parseError: error || 'Unknown parse error' };
+      return new FileEntity({ 
+        path: file, 
+        symbols: [], 
+        imports: [], 
+        parseError: error || 'Unknown parse error' 
+      });
     }
 
-    let result;
-    switch (type) {
-      case 'python':     result = extractPython(tree, contents); break;
-      case 'javascript':
-      case 'jsx':        result = extractJS(tree, contents);     break;
-      case 'typescript':
-      case 'tsx':        result = extractTS(tree, contents);     break;
-      case 'html':       result = extractHTML(tree, contents);   break;
-      case 'css':        result = extractCSS(tree, contents);    break;
-      default:           result = { symbols: [], imports: [] };  break;
-    }
+    const { adapter } = getAdapterForFile(file);
+    const rawSymbols = adapter.extractSymbols(tree, contents);
+    const imports = adapter.extractImports(tree, contents);
 
-    // Collect syntax errors from ERROR / MISSING nodes regardless of language
+    const symbols = (rawSymbols || []).map(sym => {
+      const scope = sym.scope || 'global';
+      const id = `${type}::${file}::${scope}::${sym.name}`;
+      return new SymbolEntity({
+        ...sym,
+        id,
+        file,
+        scope
+      });
+    });
+
+    let syntaxErrors = [];
     if (tree.rootNode.hasError) {
       console.warn(`[CodeGraphX] Syntax errors in ${file}, partial parse only`);
-      result.syntaxErrors = collectSyntaxErrors(tree.rootNode, contents);
-    } else {
-      result.syntaxErrors = [];
+      syntaxErrors = collectSyntaxErrors(tree.rootNode, contents);
     }
 
-    return result;
+    return new FileEntity({
+      path: file,
+      language: type,
+      symbols,
+      imports,
+      syntaxErrors
+    });
   } catch (e) {
-    // Catch WASM aborts and any other runtime errors
     console.warn(`[CodeGraphX] Failed to extract entities from ${file}: ${e.message}`);
-    return { symbols: [], imports: [], syntaxErrors: [], parseError: e.message };
+    return new FileEntity({
+      path: file,
+      symbols: [],
+      imports: [],
+      syntaxErrors: [],
+      parseError: e.message
+    });
   }
 }
 
-module.exports = { extractEntities };
+module.exports = { 
+  SymbolEntity, 
+  FileEntity, 
+  EdgeEntity, 
+  Snapshot, 
+  Repository, 
+  CommitEntity, 
+  extractEntities 
+};

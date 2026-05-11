@@ -1,6 +1,6 @@
 const { CodeGraphXServer } = require('../../src/server/mcp-server');
 const { GraphStore } = require('../../src/store');
-const { buildCallEdges } = require('../../src/edgebuilder');
+const { buildEdges } = require('../../src/edgebuilder');
 const fs = require('fs');
 
 jest.mock('@modelcontextprotocol/sdk/server/index.js', () => ({
@@ -16,7 +16,18 @@ jest.mock('@modelcontextprotocol/sdk/server/stdio.js', () => ({
   StdioServerTransport: jest.fn(),
 }));
 
-jest.mock('../../src/store');
+jest.mock('../../src/store', () => {
+  return {
+    GraphStore: jest.fn().mockImplementation(() => ({
+      getFilesData: jest.fn(),
+      symbolIndex: new Map(),
+      updateFile: jest.fn(),
+      removeFile: jest.fn(),
+      loadCache: jest.fn(),
+      saveCache: jest.fn(),
+    })),
+  };
+});
 jest.mock('../../src/edgebuilder');
 jest.mock('../../src/scanner', () => ({
   runScan: jest.fn()
@@ -43,38 +54,64 @@ describe('CodeGraphXServer', () => {
     {
       file: 'src/main.js',
       symbols: [
-        { name: 'start', type: 'function', calls: ['helper'] }
+        { id: 'javascript::src/main.js::global::start', name: 'start', type: 'function', calls: ['helper'] }
       ]
     },
     {
       file: 'src/utils.js',
       symbols: [
-        { name: 'helper', type: 'function', called_by: ['src/main.js::start'] }
+        { id: 'javascript::src/utils.js::global::helper', name: 'helper', type: 'function', called_by: ['javascript::src/main.js::global::start'] }
       ]
     }
   ];
 
   beforeEach(() => {
     jest.clearAllMocks();
+    
+    // Setup runScan mock from baseline
     const { runScan } = require('../../src/scanner');
     runScan.mockResolvedValue({
       files: mockFiles,
       edges: [
-        { from: 'src/main.js::start', to: 'src/utils.js::helper', type: 'CALLS' }
+        { from: 'javascript::src/main.js::global::start', to: 'javascript::src/utils.js::global::helper', type: 'CALLS' }
       ],
       generatedAt: new Date().toISOString()
     });
-    existsSyncSpy = jest.spyOn(fs, 'existsSync').mockReturnValue(false);
-    GraphStore.prototype.getFilesData.mockReturnValue(mockFiles);
-    buildCallEdges.mockReturnValue([
-      { from: 'src/main.js::start', to: 'src/utils.js::helper', type: 'CALLS' }
-    ]);
+
+    // Incorporate filesystem mocks from test branch
+    const originalExistsSync = fs.existsSync;
+    existsSyncSpy = jest.spyOn(fs, 'existsSync').mockImplementation((path) => {
+      if (typeof path === 'string' && path.endsWith('codebase.json')) return true;
+      if (typeof path === 'string' && path.endsWith('symbols.bloom')) return false;
+      return originalExistsSync(path);
+    });
+    const originalReadFileSync = fs.readFileSync;
+    jest.spyOn(fs, 'readFileSync').mockImplementation((path, options) => {
+      if (typeof path === 'string' && path.endsWith('codebase.json')) {
+        return JSON.stringify({ generatedAt: '2026-05-10T00:00:00.000Z' });
+      }
+      return originalReadFileSync(path, options);
+    });
+    
     server = new CodeGraphXServer();
+    
+    // Inject mock data into the instance created by the constructor
+    server.store.getFilesData.mockReturnValue(mockFiles);
+    server.store.symbolIndex.clear();
+    mockFiles.forEach(f => {
+      f.symbols.forEach(s => server.store.symbolIndex.set(s.id, { file: f.file, symbol: s }));
+    });
+    
+    buildEdges.mockReturnValue([
+      { from: 'javascript::src/main.js::global::start', to: 'javascript::src/utils.js::global::helper', type: 'CALLS' }
+    ]);
+    
     mockSetRequestHandler = server.server.setRequestHandler;
   });
 
   afterEach(() => {
     existsSyncSpy.mockRestore();
+    if (fs.readFileSync.mockRestore) fs.readFileSync.mockRestore();
   });
 
   test('list_files returns all files with summaries', async () => {
@@ -134,7 +171,7 @@ describe('CodeGraphXServer', () => {
     expect(results[0].type).toBe('function');
   });
 
-  test('query_symbol with file::name', async () => {
+  test('query_symbol with ID', async () => {
     await server.initialize();
     
     const CallToolRequestSchema = require('@modelcontextprotocol/sdk/types.js').CallToolRequestSchema;
@@ -143,7 +180,7 @@ describe('CodeGraphXServer', () => {
     const result = await handler({
       params: {
         name: 'query_symbol',
-        arguments: { name: 'src/utils.js::helper' }
+        arguments: { name: 'javascript::src/utils.js::global::helper' }
       }
     });
 
@@ -169,8 +206,9 @@ describe('CodeGraphXServer', () => {
     expect(result.content[0].text).toContain('No symbol named "nonexistent" found.');
   });
 
-  test('check_symbol_exists returns definite_no when bloom is null', async () => {
+  test('check_symbol_exists returns error when bloom is null', async () => {
     await server.initialize();
+    server.bloom = null; // Force null for this test
     
     const CallToolRequestSchema = require('@modelcontextprotocol/sdk/types.js').CallToolRequestSchema;
     const handler = mockSetRequestHandler.mock.calls.find(call => call[0] === CallToolRequestSchema)[1];
@@ -195,14 +233,14 @@ describe('CodeGraphXServer', () => {
     const result = await handler({
       params: {
         name: 'trace_impact',
-        arguments: { symbol: 'src/main.js::start', direction: 'downstream' }
+        arguments: { symbol: 'javascript::src/main.js::global::start', direction: 'downstream' }
       }
     });
 
     const data = JSON.parse(result.content[0].text);
-    expect(data.startSymbol).toBe('src/main.js::start');
+    expect(data.startSymbol).toBe('javascript::src/main.js::global::start');
     expect(data.impactGraph).toHaveLength(2); // start and helper
-    expect(data.impactGraph[0].calls).toContain('src/utils.js::helper');
+    expect(data.impactGraph[0].calls).toContain('javascript::src/utils.js::global::helper');
   });
 
   test('trace_impact upstream', async () => {
@@ -214,13 +252,13 @@ describe('CodeGraphXServer', () => {
     const result = await handler({
       params: {
         name: 'trace_impact',
-        arguments: { symbol: 'src/utils.js::helper', direction: 'upstream' }
+        arguments: { symbol: 'javascript::src/utils.js::global::helper', direction: 'upstream' }
       }
     });
 
     const data = JSON.parse(result.content[0].text);
-    expect(data.startSymbol).toBe('src/utils.js::helper');
+    expect(data.startSymbol).toBe('javascript::src/utils.js::global::helper');
     expect(data.impactGraph).toHaveLength(2); // helper and start
-    expect(data.impactGraph[0].called_by).toContain('src/main.js::start');
+    expect(data.impactGraph[0].called_by).toContain('javascript::src/main.js::global::start');
   });
 });

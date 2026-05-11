@@ -49,8 +49,8 @@ module.exports = async function () {
   function writeGraph() {
     const files = store.getFilesData();
     // Rebuilding call edges is fast
-    const { buildCallEdges } = require('./edgebuilder');
-    const edges = buildCallEdges(files);
+    const { buildEdges } = require('./edgebuilder');
+    const edges = buildEdges(files);
     
     writeJSONSync(outputFile, { files, edges, generatedAt: new Date().toISOString() });
     store.saveCache();
