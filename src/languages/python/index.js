@@ -126,13 +126,24 @@ class PythonAdapter extends BaseAdapter {
         let name = "";
         if (node.namedChildCount > 0) {
           const callTarget = node.namedChild(0);
-          if (callTarget.type === "identifier" || callTarget.type === "dotted_name") {
+          if (callTarget.type === "identifier" || callTarget.type === "dotted_name" || callTarget.type === "attribute") {
             name = callTarget.text;
           } else if (callTarget.childForFieldName("name")) {
             name = callTarget.childForFieldName("name").text;
           }
         }
-        if (name) calls.push(name);
+        if (name) {
+          // Push full name and also parts if dotted
+          calls.push(name);
+          if (name.includes('.')) {
+            const parts = name.split('.');
+            let current = "";
+            for (const part of parts) {
+              current = current ? `${current}.${part}` : part;
+              calls.push(current);
+            }
+          }
+        }
       }
       for (let i = node.namedChildCount - 1; i >= 0; i--) {
         stack.push(node.namedChild(i));

@@ -5,18 +5,22 @@ const HTMLAdapter = require('./html');
 const CSSAdapter = require('./css');
 
 const ADAPTERS = {
-  '.py':   { adapter: new PythonAdapter(),     type: 'python' },
-  '.js':   { adapter: new JavaScriptAdapter(), type: 'javascript' },
-  '.jsx':  { adapter: new JavaScriptAdapter(), type: 'jsx' },
-  '.ts':   { adapter: new TypeScriptAdapter(), type: 'typescript' },
-  '.tsx':  { adapter: new TypeScriptAdapter(), type: 'tsx' },
-  '.html': { adapter: new HTMLAdapter(),       type: 'html' },
-  '.css':  { adapter: new CSSAdapter(),        type: 'css' },
+  '.py':   { class: PythonAdapter,     type: 'python' },
+  '.js':   { class: JavaScriptAdapter, type: 'javascript' },
+  '.jsx':  { class: JavaScriptAdapter, type: 'jsx' },
+  '.ts':   { class: TypeScriptAdapter, type: 'typescript' },
+  '.tsx':  { class: TypeScriptAdapter, type: 'tsx' },
+  '.html': { class: HTMLAdapter,       type: 'html' },
+  '.css':  { class: CSSAdapter,        type: 'css' },
 };
 
 function getAdapterForFile(file) {
   const ext = file.slice(file.lastIndexOf('.')).toLowerCase();
-  return ADAPTERS[ext] || ADAPTERS['.py'];
+  const entry = ADAPTERS[ext] || ADAPTERS['.py'];
+  return {
+    adapter: new entry.class(),
+    type: entry.type
+  };
 }
 
 module.exports = { getAdapterForFile, ADAPTERS };

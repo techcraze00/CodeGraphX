@@ -108,14 +108,7 @@ class JavaScriptAdapter extends BaseAdapter {
       if (node.type === "call_expression") {
         let funcNode = node.childForFieldName("function") || node.child(0);
         if (funcNode) {
-          if (funcNode.type === "identifier") {
-            calls.push(funcNode.text);
-          } else if (funcNode.type === "member_expression") {
-            const prop = funcNode.childForFieldName("property") || funcNode.child(funcNode.childCount - 1);
-            if (prop && (prop.type === "property_identifier" || prop.type === "identifier")) {
-              calls.push(prop.text);
-            }
-          }
+          calls.push(funcNode.text);
         }
       }
 

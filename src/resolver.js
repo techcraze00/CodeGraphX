@@ -10,13 +10,19 @@ const path = require('path');
  * @returns {string|null} - Resolved relative path to the imported file, or null
  */
 function resolveImport(importerFile, importString, allKnownFiles, projectRoot) {
+  let normalizedSource = importString;
+  // Normalize Python relative imports (.utils -> ./utils)
+  if (importString.startsWith('.') && !importString.startsWith('./') && !importString.startsWith('../')) {
+      normalizedSource = './' + importString.substring(1).replace(/\./g, '/');
+  }
+
   // 1. Relative import resolution
-  if (importString.startsWith('.')) {
+  if (normalizedSource.startsWith('.')) {
     const dir = path.dirname(importerFile);
-    const resolved = path.join(dir, importString);
+    const resolved = path.join(dir, normalizedSource);
     
     // Check exact match or with extensions
-    const exts = ['', '.js', '.jsx', '.ts', '.tsx', '.py', '/index.js', '/index.ts'];
+    const exts = ['', '.js', '.jsx', '.ts', '.tsx', '.py', '/index.js', '/index.ts', '/__init__.py'];
     for (const ext of exts) {
       const testPath = resolved + ext;
       if (allKnownFiles.includes(testPath)) {
@@ -30,7 +36,9 @@ function resolveImport(importerFile, importString, allKnownFiles, projectRoot) {
   // e.g. "utils" -> "src/utils.js"
   const fallbackMatch = allKnownFiles.find(f => {
     const base = path.basename(f, path.extname(f));
-    return base === importString || f.endsWith(`/${importString}/index.js`);
+    return base === normalizedSource || 
+           f.endsWith(`/${normalizedSource}/index.js`) ||
+           f.endsWith(`/${normalizedSource}/__init__.py`);
   });
   
   return fallbackMatch || null;
@@ -39,11 +47,16 @@ function resolveImport(importerFile, importString, allKnownFiles, projectRoot) {
 module.exports = { resolveImport };
 
 function resolveSourceToFile(importerFile, source, allKnownFiles) {
-    if (source.startsWith('.')) {
-        const path = require('path');
+    let normalizedSource = source;
+    // Normalize Python relative imports (.utils -> ./utils)
+    if (source.startsWith('.') && !source.startsWith('./') && !source.startsWith('../')) {
+        normalizedSource = './' + source.substring(1).replace(/\./g, '/');
+    }
+
+    if (normalizedSource.startsWith('.')) {
         const dir = path.dirname(importerFile);
-        const resolved = path.join(dir, source);
-        const exts = ['', '.js', '.jsx', '.ts', '.tsx', '.py', '/index.js', '/index.ts'];
+        const resolved = path.join(dir, normalizedSource);
+        const exts = ['', '.js', '.jsx', '.ts', '.tsx', '.py', '/index.js', '/index.ts', '/__init__.py'];
         for (const ext of exts) {
           const testPath = resolved + ext;
           if (allKnownFiles.includes(testPath)) {
@@ -54,9 +67,12 @@ function resolveSourceToFile(importerFile, source, allKnownFiles) {
     
     // Heuristic fallback for non-relative
     const fallbackMatch = allKnownFiles.find(f => {
-      const path = require('path');
       const base = path.basename(f, path.extname(f));
-      return base === source || f.endsWith(`/${source}/index.js`) || f.endsWith(`/${source}.js`) || f.endsWith(`/${source}.py`);
+      return base === normalizedSource || 
+             f.endsWith(`/${normalizedSource}/index.js`) || 
+             f.endsWith(`/${normalizedSource}/__init__.py`) ||
+             f.endsWith(`/${normalizedSource}.js`) || 
+             f.endsWith(`/${normalizedSource}.py`);
     });
     
     return fallbackMatch || null;
