@@ -1,108 +1,102 @@
 const { EdgeEntity } = require('./entities');
+const SymbolRegistry = require('./registry');
+const { resolveSourceToFile } = require('./resolver');
 
-/**
- * buildEdges - Entry point for graph edge construction.
- * Scans all file data and builds normalized edges of various types.
- */
-function buildEdges(files) {
+function buildEdges(files, projectRoot) {
   const edges = [];
+  const registry = new SymbolRegistry();
+  const allKnownFiles = files.map(f => f.path || f.file);
   
-  // Build lookup index for symbols by ID and by name
-  const symbolIndex = new Map(); // id -> symbol
-  const nameToIndex = new Map(); // name -> symbol array
-  
+  // 1. Register all symbols
   files.forEach(f => {
-    (f.symbols || []).forEach(s => {
-      symbolIndex.set(s.id, { file: f.file || f.path, symbol: s });
-      if (!nameToIndex.has(s.name)) nameToIndex.set(s.name, []);
-      nameToIndex.get(s.name).push({ file: f.file || f.path, symbol: s });
-    });
-  });
-
-  // 1. Build CALLS edges
-  edges.push(...buildCallEdges(files, nameToIndex));
-
-  // 2. Build IMPORTS edges
-  edges.push(...buildImportEdges(files));
-
-  // 3. Build INHERITS and IMPLEMENTS edges (from symbol ontology)
-  edges.push(...buildOntologyEdges(files, nameToIndex));
-
-  // 4. Build USES and REFERENCES edges (placeholders for now, or rudimentary logic)
-  edges.push(...buildReferenceEdges(files, nameToIndex));
-
-  return edges;
-}
-
-function buildCallEdges(files, nameToIndex) {
-  const edges = [];
-  files.forEach(f => {
-    (f.symbols || []).forEach(s => {
-      if (!s.calls) return;
-      s.calls.forEach(calleeName => {
-        const targets = nameToIndex.get(calleeName) || [];
-        targets.forEach(target => {
-          if (target.symbol.id === s.id) return;
-          edges.push(new EdgeEntity({
-            from: s.id,
-            to: target.symbol.id,
-            type: 'CALLS'
-          }));
-        });
+    (f.declaredSymbols || []).forEach(s => {
+      registry.registerSymbol({
+          symbol_id: s.id,
+          name: s.name,
+          kind: s.type,
+          file: f.path || f.file,
+          exported: true, // simplified for Phase 1
+          language: 'unknown'
       });
     });
   });
-  return edges;
-}
 
-function buildImportEdges(files) {
-  const edges = [];
-  // Currently FileEntity has 'imports' as a flat string array.
-  // Full resolution to another FileEntity or SymbolEntity belongs in Phase 1.
-  // For Phase 0.3, we represent the extraction.
+  // 2. Build CALLS edges
   files.forEach(f => {
-    (f.imports || []).forEach(imp => {
-      // In a real system, we'd resolve 'imp' to a file path.
-      // For now, we record the intent.
-      edges.push(new EdgeEntity({
-        from: f.file || f.path,
-        to: imp,
-        type: 'IMPORTS',
-        confidence: 0.5 // Unresolved import
-      }));
-    });
-  });
-  return edges;
-}
+    const currentFilePath = f.path || f.file;
+    (f.declaredSymbols || []).forEach(s => {
+      if (!s.calls) return;
+      
+      s.calls.forEach(calleeName => {
+        let resolvedTargetId = null;
+        let confidence = 0.5;
 
-function buildOntologyEdges(files, nameToIndex) {
-  const edges = [];
-  files.forEach(f => {
-    (f.symbols || []).forEach(s => {
-      if (!s.ontology) return;
-      s.ontology.forEach(rel => {
-        // Expected format: { type: 'INHERITS', target: 'BaseClassName' }
-        if (['INHERITS', 'IMPLEMENTS'].includes(rel.type)) {
-          const targets = nameToIndex.get(rel.target) || [];
-          targets.forEach(target => {
+        // Step A: Check Local Scope
+        const localMatch = (f.declaredSymbols || []).find(sym => sym.name === calleeName);
+        if (localMatch) {
+            resolvedTargetId = localMatch.id;
+            confidence = 1.0;
+        }
+
+        // Step B: Check Imports
+        if (!resolvedTargetId) {
+            const importMatch = (f.imports || []).find(imp => imp.localName === calleeName);
+            if (importMatch) {
+                const targetFile = resolveSourceToFile(currentFilePath, importMatch.source, allKnownFiles);
+                if (targetFile) {
+                    const fileExports = registry.getExportsByFile(targetFile);
+                    let exportedSymbol = null;
+                    if (importMatch.importedName === '*') {
+                        // just map to first export or default for simplicity in Phase 1
+                        exportedSymbol = fileExports.find(exp => exp.name === 'default') || fileExports[0];
+                    } else if (importMatch.importedName === 'default') {
+                        exportedSymbol = fileExports.find(exp => exp.name === 'default') || fileExports[0]; 
+                    } else {
+                        exportedSymbol = fileExports.find(exp => exp.name === importMatch.importedName);
+                    }
+
+                    if (exportedSymbol) {
+                        resolvedTargetId = exportedSymbol.symbol_id;
+                        confidence = 1.0;
+                    }
+                }
+            }
+        }
+
+        // Step C: Fallback Heuristic
+        if (!resolvedTargetId) {
+            const globalMatches = registry.getSymbolsByName(calleeName);
+            if (globalMatches.length > 0) {
+                resolvedTargetId = globalMatches[0].symbol_id;
+                confidence = 0.5;
+            }
+        }
+
+        if (resolvedTargetId && resolvedTargetId !== s.id) {
             edges.push(new EdgeEntity({
-              from: s.id,
-              to: target.symbol.id,
-              type: rel.type
+                from: s.id,
+                to: resolvedTargetId,
+                type: 'CALLS',
+                confidence
             }));
-          });
         }
       });
     });
   });
+
+  // 3. Build rudimentary IMPORTS edges for UI/Graph compatibility
+  files.forEach(f => {
+    (f.imports || []).forEach(imp => {
+      edges.push(new EdgeEntity({
+        from: f.path || f.file,
+        to: imp.source,
+        type: 'IMPORTS',
+        confidence: 1.0
+      }));
+    });
+  });
+
   return edges;
 }
 
-function buildReferenceEdges(files, nameToIndex) {
-  // USES and REFERENCES are often for variables or types.
-  // ROUTES_TO is for web framework routing.
-  // These will be deeply implemented in Phase 1 and 6.
-  return [];
-}
-
-module.exports = { buildEdges, buildCallEdges };
+module.exports = { buildEdges };
