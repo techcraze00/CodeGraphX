@@ -40,6 +40,24 @@ describe('CodeGraphX Parser System', () => {
         ])
       );
     });
+
+    test('JavaScript adapter extracts structured imports', () => {
+      const JavaScriptAdapter = require('../src/languages/javascript/index.js');
+      const adapter = new JavaScriptAdapter();
+      const code = `
+        import { login as authLogin } from "@/auth/service";
+        import defaultExport from "module-name";
+        import * as namespace from "namespace-module";
+      `;
+      const tree = adapter.parse(code);
+      const imports = adapter.extractImports(tree, code);
+      
+      expect(imports).toEqual([
+        { localName: 'authLogin', importedName: 'login', source: '@/auth/service' },
+        { localName: 'defaultExport', importedName: 'default', source: 'module-name' },
+        { localName: 'namespace', importedName: '*', source: 'namespace-module' }
+      ]);
+    });
   });
 
   describe('Python Parsing', () => {

@@ -57,11 +57,37 @@ class JavaScriptAdapter extends BaseAdapter {
       if (!node) continue;
 
       if (node.type === "import_statement") {
-        for (let i = 0; i < node.childCount; i++) {
-          const child = node.child(i);
-          if (child && (child.type === "string" || child.type === "identifier")) {
-            imports.push(child.text);
-          }
+        const sourceNode = node.childForFieldName("source");
+        const source = sourceNode ? sourceNode.text.replace(/['"]/g, '') : null;
+        
+        let importClause = node.children.find(c => c.type === 'import_clause');
+        if (importClause) {
+            let namespaceImport = importClause.children.find(c => c.type === 'namespace_import');
+            if (namespaceImport) {
+                let localNameNode = namespaceImport.childForFieldName('alias') || namespaceImport.children.find(c => c.type === 'identifier');
+                if (localNameNode) imports.push({ localName: localNameNode.text, importedName: '*', source });
+            }
+            
+            let defaultImport = importClause.children.find(c => c.type === 'identifier');
+            if (defaultImport) {
+                imports.push({ localName: defaultImport.text, importedName: 'default', source });
+            }
+            
+            let namedImports = importClause.children.find(c => c.type === 'named_imports');
+            if (namedImports) {
+                let specifiers = namedImports.children.filter(c => c.type === 'import_specifier');
+                for (let spec of specifiers) {
+                    let importedNameNode = spec.childForFieldName('name') || spec.children.find(c => c.type === 'identifier');
+                    let localNameNode = spec.childForFieldName('alias');
+                    let importedName = importedNameNode ? importedNameNode.text : null;
+                    let localName = localNameNode ? localNameNode.text : importedName;
+                    if (importedName && localName) {
+                        imports.push({ localName, importedName, source });
+                    }
+                }
+            }
+        } else if (source) {
+             imports.push({ localName: null, importedName: null, source });
         }
       }
 
