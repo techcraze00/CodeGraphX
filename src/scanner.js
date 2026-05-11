@@ -3,7 +3,8 @@ const path = require('path');
 const fs = require('fs');
 const { findFiles, writeJSONSync, ensureDirSync, loadConfig } = require('./utils');
 const { GraphStore } = require('./store');
-const { buildCallEdges } = require('./edgebuilder');
+const { buildEdges } = require('./edgebuilder');
+const { Snapshot, FileEntity } = require('./entities');
 
 /**
  * Core scanning logic - extracts symbols, builds graph, outputs artifacts
@@ -11,7 +12,7 @@ const { buildCallEdges } = require('./edgebuilder');
  * @param {string} projectRoot - Absolute path to project root
  * @param {object} config - Loaded config object
  * @param {boolean} mcpMode - If true, skip heavy outputs (HTML, TOON) for faster MCP startup
- * @returns {Promise<object>} - The generated graph data { files, edges, generatedAt }
+ * @returns {Promise<Snapshot>} - The generated snapshot
  */
 async function runScan(projectRoot, config, mcpMode = false) {
   const outputDir = path.join(projectRoot, config.outputDir);
@@ -41,21 +42,24 @@ async function runScan(projectRoot, config, mcpMode = false) {
     }
   }
   
-  const results = store.getFilesData();
-  const edges = buildCallEdges(results);
+  const filesData = store.getFilesData();
+  const edges = buildEdges(filesData);
   
-  // Write main codebase JSON
-  writeJSONSync(outputFile, { 
-    files: results, 
-    edges, 
-    generatedAt: new Date().toISOString() 
+  const snapshot = new Snapshot({
+    id: `snap-${Date.now()}`,
+    timestamp: Date.now(),
+    files: filesData.map(f => new FileEntity(f)),
+    edges: edges
   });
+
+  // Write main codebase JSON
+  writeJSONSync(outputFile, snapshot.toJSON());
   store.saveCache();
 
   // === BLOOM FILTER (critical for MCP check_symbol_exists) ===
   try {
     const { BloomFilter } = require('bloom-filters');
-    const allSymbols = results.flatMap(f => (f.symbols||[]).map(s => s.name).filter(Boolean));
+    const allSymbols = snapshot.files.flatMap(f => (f.symbols||[]).map(s => s.name).filter(Boolean));
     const bloom = BloomFilter.from(allSymbols, 0.01);
     const bloomJSON = JSON.stringify(bloom.saveAsJSON());
     fs.writeFileSync(path.join(outputDir, 'symbols.bloom'), bloomJSON, 'utf8');
@@ -69,19 +73,22 @@ async function runScan(projectRoot, config, mcpMode = false) {
     // === D3-FORCE GRAPH OUTPUT ===
     try {
       const d3Nodes = [];
-      results.forEach(f => {
-        d3Nodes.push({ id: f.file, type: "file" });
+      snapshot.files.forEach(f => {
+        d3Nodes.push({ id: f.path, type: "file" });
         (f.symbols||[]).forEach(s => {
-          d3Nodes.push({ id: f.file+"::"+s.name, type: s.type||"symbol", file: f.file });
+          d3Nodes.push({ id: s.id, type: s.type||"symbol", file: f.path });
         });
       });
-      const callLinks = edges.map(edge => ({ source: edge.from, target: edge.to, type: edge.type }));
+      const callLinks = snapshot.edges.map(edge => ({ source: edge.from, target: edge.to, type: edge.type }));
       const importLinks = [];
-      results.forEach(f => {
+      const allFiles = snapshot.files.map(r => r.path);
+      const { resolveImport } = require('./resolver');
+      
+      snapshot.files.forEach(f => {
         (f.imports||[]).forEach(im => {
-          const match = results.find(ff => path.basename(ff.file, path.extname(ff.file)) === im);
-          if (match) {
-            importLinks.push({ source: f.file, target: match.file, type: "IMPORTS" });
+          const matchPath = resolveImport(f.path, im, allFiles, projectRoot);
+          if (matchPath) {
+            importLinks.push({ source: f.path, target: matchPath, type: "IMPORTS" });
           }
         });
       });
@@ -96,8 +103,8 @@ async function runScan(projectRoot, config, mcpMode = false) {
       const htmlFile = path.join(outputDir, 'codegraph.html');
       const graphData = JSON.parse(fs.readFileSync(path.join(outputDir, 'codegraph-graph.json'), 'utf8'));
       const { getHtml } = require('./dashboard');
-      const filesCount = results.length;
-      const symbolsCount = results.reduce((n,f)=>n+(f.symbols?.length||0),0);
+      const filesCount = snapshot.files.length;
+      const symbolsCount = snapshot.files.reduce((n,f)=>n+(f.symbols?.length||0),0);
       let html = getHtml(JSON.stringify(graphData, null, 2), filesCount, symbolsCount);
       fs.writeFileSync(htmlFile, html, 'utf8');
     } catch (e) {
@@ -107,25 +114,25 @@ async function runScan(projectRoot, config, mcpMode = false) {
     // === TOON OUTPUTS ===
     try {
       const { encode } = require('@toon-format/toon');
-      const fileIndexToon = encode({ files: results.map(r => ({
-        file: r.file,
+      const fileIndexToon = encode({ files: snapshot.files.map(r => ({
+        file: r.path,
         summary: (r.symbols||[]).filter(s => ['class', 'function'].includes(s.type)).map(s => s.name).join(', ') || 'No main symbols'
       })) });
       fs.writeFileSync(path.join(outputDir, 'file_index.toon'), fileIndexToon, 'utf8');
       
-      const graphToon = encode({ files: results, edges });
+      const graphToon = encode(snapshot.toJSON());
       fs.writeFileSync(path.join(outputDir, 'codegraph.toon'), graphToon, 'utf8');
       
       let changelogData = {
-        generatedAt: new Date().toISOString(),
-        fileCount: results.length,
-        symbolCount: results.reduce((n, f) => n + (f.symbols?.length||0), 0),
+        generatedAt: new Date(snapshot.timestamp).toISOString(),
+        fileCount: snapshot.files.length,
+        symbolCount: snapshot.files.reduce((n, f) => n + (f.symbols?.length||0), 0),
         sessions: []
       };
       try {
         const { scanCommit } = require('./git/commit-scanner');
         const gitSummary = scanCommit(projectRoot, store, 'HEAD');
-        if (gitSummary) changelogData.sessions.push(gitSummary);
+        if (gitSummary) changelogData.sessions.push(gitSummary.toJSON());
       } catch(e) {}
       
       const changelogToon = encode(changelogData);
@@ -142,8 +149,8 @@ Last updated: ${new Date().toISOString()}
 
 ## How to Navigate This Codebase
 
-- Files: ${results.length}
-- Symbols: ${results.reduce((n, f) => n + (f.symbols?.length||0), 0)}
+- Files: ${snapshot.files.length}
+- Symbols: ${snapshot.files.reduce((n, f) => n + (f.symbols?.length||0), 0)}
 
 ## MCP Server
 Add to .gemini/mcp.json:
@@ -167,7 +174,7 @@ Add to .gemini/mcp.json:
     }
   }
   
-  return { files: results, edges, generatedAt: new Date().toISOString() };
+  return snapshot;
 }
 
 module.exports = { runScan };

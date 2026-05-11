@@ -1,0 +1,5 @@
+Please execute Phase 0.3: Stable Graph Schema and Phase 0.4: Testing Infrastructure from our Phased Development roadmap.
+For Phase 0.3, define the normalized graph model and ensure the system is capable of extracting and representing all required edge types: CALLS, IMPORTS,INHERITS, IMPLEMENTS, USES, REFERENCES, and ROUTES_TO.
+For Phase 0.4, enhance the testing infrastructure with comprehensive tests (including fixture repositories, parser snapshot tests, and edge consistency tests) covering parser adapters, entity extraction, the diff engine, graph builder, and bloom filters.
+You have access to all system architecture documents in the `TruIntellegence documents/` directory and the master plan in `CodeGraphV2.md`. Please utilize your available agent skills, MCP servers, and CLI tools wisely and autonomously to maintain a strong handle on the codebase and complete these tasks efficiently.
+Please provide the summary of the actions you plan to take for Phase 0.3 and Phase 0.4, including any architectural decisions, code changes, or tests you intend to implement, before proceeding with execution.

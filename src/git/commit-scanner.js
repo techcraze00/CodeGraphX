@@ -1,6 +1,7 @@
 const { execFileSync } = require('child_process');
 const fs = require('fs');
 const path = require('path');
+const { CommitEntity } = require('../entities');
 
 function runGit(args) {
   try {
@@ -104,6 +105,9 @@ function generateSummary(diffStr) {
 function scanCommit(projectRoot, store, branch = 'HEAD') {
   const currentBranch = runGit(['rev-parse', '--abbrev-ref', 'HEAD']);
   const commitHash = runGit(['log', '-1', '--pretty=%H', branch]);
+  const author = runGit(['log', '-1', '--pretty=%an', branch]);
+  const timestamp = runGit(['log', '-1', '--pretty=%at', branch]);
+  const message = runGit(['log', '-1', '--pretty=%s', branch]);
   const diffStr = runGit(['diff', `${branch}~1`, branch, '--unified=0']);
   
   if (!diffStr) return null;
@@ -112,15 +116,15 @@ function scanCommit(projectRoot, store, branch = 'HEAD') {
   const { added, removed, modified } = mapDiffToNodes(changes, store.getFilesData());
   const ruleSummary = generateSummary(diffStr);
 
-  return {
-    date: new Date().toISOString(),
-    commit: commitHash,
+  return new CommitEntity({
+    hash: commitHash,
+    author,
+    timestamp: parseInt(timestamp, 10) * 1000,
+    message,
     branch: currentBranch,
-    added,
-    removed,
-    modified,
-    rule_summary: ruleSummary
-  };
+    changes: { added, removed, modified },
+    summary: ruleSummary
+  });
 }
 
 module.exports = { scanCommit, parseDiff, mapDiffToNodes, generateSummary };

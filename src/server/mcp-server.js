@@ -8,7 +8,7 @@ const {
 } = require("@modelcontextprotocol/sdk/types.js");
 const { GraphStore } = require("../store");
 const { loadConfig, ensureDirSync } = require("../utils");
-const { buildCallEdges } = require("../edgebuilder");
+const { buildEdges } = require("../edgebuilder");
 const fs = require("fs");
 const path = require("path");
 const { BloomFilter } = require("bloom-filters");
@@ -114,7 +114,7 @@ class CodeGraphXServer {
     
     if (hasCache) {
       // Load edges and metadata from cache
-      this.graph.edges = buildCallEdges(this.graph.files);
+      this.graph.edges = buildEdges(this.graph.files);
       try {
         const data = JSON.parse(fs.readFileSync(codebasePath, "utf8"));
         this.graph.generatedAt = data.generatedAt;
@@ -344,17 +344,16 @@ class CodeGraphXServer {
         if (!symbolName) throw new Error("Symbol name is required");
 
         let matches = [];
-        if (symbolName.includes("::")) {
-          const [filePath, sym] = symbolName.split("::");
-          const fileData = this.graph.files.find(f => f.file === filePath);
-          if (fileData) {
-            const symbol = (fileData.symbols || []).find(s => s.name === sym);
-            if (symbol) matches.push({ file: fileData.file, symbol });
-          }
+        // Try exact ID match first via store index
+        const exactMatch = this.store.symbolIndex.get(symbolName);
+        if (exactMatch) {
+          matches.push(exactMatch);
         } else {
+          // Fallback to name-based heuristic search
+          const searchName = symbolName.includes("::") ? symbolName.split("::").pop() : symbolName;
           this.graph.files.forEach(f => {
             (f.symbols || []).forEach(s => {
-              if (s.name === symbolName) matches.push({ file: f.file, symbol: s });
+              if (s.name === searchName) matches.push({ file: f.file, symbol: s });
             });
           });
         }
@@ -368,6 +367,7 @@ class CodeGraphXServer {
 
         const results = matches.map(match => ({
           file: match.file,
+          id: match.symbol.id,
           type: match.symbol.type,
           location: match.symbol.startPosition ? `row ${match.symbol.startPosition.row + 1}` : "unknown",
           calls: match.symbol.calls || [],
@@ -377,6 +377,7 @@ class CodeGraphXServer {
 
         return {
           content: [{ type: "text", text: JSON.stringify(results, null, 2) }],
+          isError: false,
         };
       }
 
@@ -399,6 +400,7 @@ class CodeGraphXServer {
               exists: this.bloom.has(symbolName) ? "probable_yes" : "definite_no",
             }, null, 2),
           }],
+          isError: false,
         };
       }
 
@@ -407,18 +409,30 @@ class CodeGraphXServer {
         if (!startSymbol || !direction) throw new Error("Symbol and direction are required");
 
         const findSymbol = (id) => {
+          // 1. Try exact ID lookup in symbol index
+          const indexed = this.store.symbolIndex.get(id);
+          if (indexed) return { ...indexed, id: indexed.symbol.id };
+
+          // 2. Fallback to file::name or bare name search
           let filePath, symName;
           if (id.includes("::")) {
             const parts = id.split("::");
-            filePath = parts[0];
-            symName  = parts[1];
+            // If it has 4 parts, it might be an ID but not found in index.
+            // If it has 2 parts, it's file::name
+            if (parts.length === 2) {
+              filePath = parts[0];
+              symName  = parts[1];
+            } else {
+              symName = parts.pop();
+            }
           } else {
             symName = id;
           }
+
           for (const f of this.graph.files) {
             if (filePath && f.file !== filePath) continue;
-            const symbol = (f.symbols || []).find(s => s.name === symName);
-            if (symbol) return { file: f.file, symbol, id: `${f.file}::${symbol.name}` };
+            const symbol = (f.symbols || []).find(s => s.name === symName || s.id === id);
+            if (symbol) return { file: f.file, symbol, id: symbol.id };
           }
           return null;
         };
@@ -447,8 +461,9 @@ class CodeGraphXServer {
 
           const neighbors = direction === "downstream"
             ? rawNeighbors.map(calleeName => {
+                // Try to find an edge that matches this callee name from this source
                 const edge = this.graph.edges.find(
-                  e => e.from === node.id && e.to.endsWith(`::${calleeName}`)
+                  e => e.from === node.id && (e.to === calleeName || e.to.endsWith(`::${calleeName}`))
                 );
                 return edge ? edge.to : calleeName;
               })
@@ -481,6 +496,7 @@ class CodeGraphXServer {
               impactGraph: results
             }, null, 2),
           }],
+          isError: false,
         };
       }
 
