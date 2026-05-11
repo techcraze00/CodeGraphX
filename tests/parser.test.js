@@ -76,6 +76,22 @@ describe('CodeGraphX Parser System', () => {
         ])
       );
     });
+
+    test('Python adapter extracts structured imports', () => {
+      const PythonAdapter = require('../src/languages/python/index.js');
+      const adapter = new PythonAdapter();
+      const code = `
+from auth.service import login as authLogin
+import sys
+import os as myos
+      `;
+      const tree = adapter.parse(code);
+      const imports = adapter.extractImports(tree, code);
+      
+      expect(imports).toContainEqual({ localName: 'authLogin', importedName: 'login', source: 'auth.service' });
+      expect(imports).toContainEqual({ localName: 'sys', importedName: '*', source: 'sys' });
+      expect(imports).toContainEqual({ localName: 'myos', importedName: '*', source: 'os' });
+    });
   });
 
   describe('TypeScript Parsing', () => {

@@ -69,20 +69,46 @@ class PythonAdapter extends BaseAdapter {
 
   extractImports(tree, contents) {
     const results = [];
+    if (!tree || !tree.rootNode) return results;
     let stack = [tree.rootNode];
     while (stack.length) {
       const node = stack.pop();
+      if (!node) continue;
+      
       if (node.type === "import_statement") {
-        for (let i = 0; i < node.namedChildCount; i++) {
-          const child = node.namedChild(i);
-          if (child.type === "dotted_name") {
-            results.push(child.text);
+        for (let i = 0; i < node.childCount; i++) {
+          if (node.fieldNameForChild(i) === "name") {
+            const child = node.child(i);
+            if (child.type === "dotted_name") {
+              results.push({ localName: child.text, importedName: '*', source: child.text });
+            } else if (child.type === "aliased_import") {
+              const nameNode = child.childForFieldName("name");
+              const aliasNode = child.childForFieldName("alias");
+              if (nameNode && aliasNode) {
+                results.push({ localName: aliasNode.text, importedName: '*', source: nameNode.text });
+              }
+            }
           }
         }
-      }
-      if (node.type === "import_from_statement") {
-        const mod = node.childForFieldName("module");
-        if (mod) results.push(mod.text);
+      } else if (node.type === "import_from_statement") {
+        const mod = node.childForFieldName("module_name");
+        const source = mod ? mod.text : null;
+        if (source) {
+          for (let i = 0; i < node.childCount; i++) {
+            if (node.fieldNameForChild(i) === "name") {
+              const child = node.child(i);
+              if (child.type === "dotted_name") {
+                results.push({ localName: child.text, importedName: child.text, source });
+              } else if (child.type === "aliased_import") {
+                const nameNode = child.childForFieldName("name");
+                const aliasNode = child.childForFieldName("alias");
+                if (nameNode && aliasNode) {
+                  results.push({ localName: aliasNode.text, importedName: nameNode.text, source });
+                }
+              }
+            }
+          }
+        }
       }
       for (let i = node.namedChildCount - 1; i >= 0; i--) {
         stack.push(node.namedChild(i));
