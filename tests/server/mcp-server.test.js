@@ -18,8 +18,21 @@ jest.mock('@modelcontextprotocol/sdk/server/stdio.js', () => ({
 
 jest.mock('../../src/store');
 jest.mock('../../src/edgebuilder');
+jest.mock('../../src/scanner', () => ({
+  runScan: jest.fn()
+}));
 jest.mock('../../src/utils', () => ({
-  loadConfig: jest.fn().mockReturnValue({ outputDir: '.codegraphx', outputFile: 'codebase.json' })
+  loadConfig: jest.fn().mockReturnValue({ outputDir: '.codegraphx', outputFile: 'codebase.json' }),
+  ensureDirSync: jest.fn(),
+  findFiles: jest.fn().mockReturnValue([]),
+  writeJSONSync: jest.fn()
+}));
+
+jest.mock('bloom-filters', () => ({
+  BloomFilter: {
+    from: jest.fn(),
+    fromJSON: jest.fn()
+  }
 }));
 
 describe('CodeGraphXServer', () => {
@@ -43,6 +56,14 @@ describe('CodeGraphXServer', () => {
 
   beforeEach(() => {
     jest.clearAllMocks();
+    const { runScan } = require('../../src/scanner');
+    runScan.mockResolvedValue({
+      files: mockFiles,
+      edges: [
+        { from: 'src/main.js::start', to: 'src/utils.js::helper', type: 'CALLS' }
+      ],
+      generatedAt: new Date().toISOString()
+    });
     existsSyncSpy = jest.spyOn(fs, 'existsSync').mockReturnValue(false);
     GraphStore.prototype.getFilesData.mockReturnValue(mockFiles);
     buildCallEdges.mockReturnValue([
