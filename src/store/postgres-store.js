@@ -39,6 +39,54 @@ class PostgresGraphStore {
       ]))
       .execute();
   }
+
+  async updateFile(repositoryId, currentCommitId, path, contentHash, language) {
+    return await this.db.transaction().execute(async (trx) => {
+      // 1. Ensure file blob exists
+      await trx.insertInto('file_blobs')
+        .values({
+          content_hash: contentHash,
+          storage_type: 'local_fs' // default
+        })
+        .onConflict((oc) => oc.column('content_hash').doNothing())
+        .execute();
+
+      // 2. Look for open file record
+      const activeFile = await trx.selectFrom('files')
+        .selectAll()
+        .where('repository_id', '=', repositoryId)
+        .where('path', '=', path)
+        .where('valid_to_commit_id', 'is', null)
+        .executeTakeFirst();
+
+      if (activeFile && activeFile.content_hash === contentHash) {
+        return activeFile.id; // Unchanged
+      }
+
+      // 3. Invalidate old file
+      if (activeFile) {
+        await trx.updateTable('files')
+          .set({ valid_to_commit_id: currentCommitId })
+          .where('id', '=', activeFile.id)
+          .execute();
+      }
+
+      // 4. Insert new file record
+      const newFile = await trx.insertInto('files')
+        .values({
+          repository_id: repositoryId,
+          path,
+          content_hash: contentHash,
+          language,
+          valid_from_commit_id: currentCommitId
+        })
+        .returning('id')
+        .executeTakeFirstOrThrow();
+
+      return newFile.id;
+    });
+  }
+
 }
 
 module.exports = { PostgresGraphStore };

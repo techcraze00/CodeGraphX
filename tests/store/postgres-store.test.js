@@ -69,4 +69,26 @@ describe('PostgresGraphStore', () => {
     expect(filesAtCommit2).toHaveLength(1);
     expect(filesAtCommit2[0].content_hash).toBe('hash2');
   });
+
+  test('updateFile dedups blobs and correctly handles SCD2 invalidation', async () => {
+    const commitId1 = await store.addCommit(repoId, 'hash-file-1', 'msg');
+    const commitId2 = await store.addCommit(repoId, 'hash-file-2', 'msg2');
+
+    // Add a file
+    const fileId1 = await store.updateFile(repoId, commitId1, '/app.js', 'content-hash-A', 'javascript');
+    expect(fileId1).toBeDefined();
+
+    // Update same file with new hash in new commit
+    const fileId2 = await store.updateFile(repoId, commitId2, '/app.js', 'content-hash-B', 'javascript');
+    expect(fileId2).not.toBe(fileId1);
+
+    // Check that old file is closed
+    const oldFile = await db.selectFrom('files').where('id', '=', fileId1).selectAll().executeTakeFirst();
+    expect(oldFile.valid_to_commit_id).toBe(commitId2);
+
+    // Check that new file is open
+    const newFile = await db.selectFrom('files').where('id', '=', fileId2).selectAll().executeTakeFirst();
+    expect(newFile.valid_from_commit_id).toBe(commitId2);
+    expect(newFile.valid_to_commit_id).toBeNull();
+  });
 });
