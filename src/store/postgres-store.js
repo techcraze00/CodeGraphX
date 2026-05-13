@@ -87,6 +87,56 @@ class PostgresGraphStore {
     });
   }
 
+  async updateSymbols(repositoryId, currentCommitId, fileId, newSymbols) {
+    return await this.db.transaction().execute(async (trx) => {
+      // Get currently active symbols for this file
+      const activeSymbols = await trx.selectFrom('symbols')
+        .selectAll()
+        .where('file_id', '=', fileId)
+        .where('valid_to_commit_id', 'is', null)
+        .execute();
+
+      const newSymbolsMap = new Map(newSymbols.map(s => [s.qualified_name, s]));
+      const activeSymbolsMap = new Map(activeSymbols.map(s => [s.qualified_name, s]));
+
+      const symbolsToClose = [];
+      const symbolsToInsert = [];
+
+      // 1. Identify which old symbols to close
+      for (const oldSym of activeSymbols) {
+        const newSym = newSymbolsMap.get(oldSym.qualified_name);
+        if (!newSym || newSym.symbol_hash !== oldSym.symbol_hash) {
+          symbolsToClose.push(oldSym.id);
+        }
+      }
+
+      // 2. Close them
+      if (symbolsToClose.length > 0) {
+        await trx.updateTable('symbols')
+          .set({ valid_to_commit_id: currentCommitId })
+          .where('id', 'in', symbolsToClose)
+          .execute();
+      }
+
+      // 3. Identify which new symbols to insert
+      for (const newSym of newSymbols) {
+        const oldSym = activeSymbolsMap.get(newSym.qualified_name);
+        if (!oldSym || oldSym.symbol_hash !== newSym.symbol_hash) {
+          symbolsToInsert.push({
+            repository_id: repositoryId,
+            file_id: fileId,
+            valid_from_commit_id: currentCommitId,
+            ...newSym
+          });
+        }
+      }
+
+      if (symbolsToInsert.length > 0) {
+        await trx.insertInto('symbols').values(symbolsToInsert).execute();
+      }
+    });
+  }
+
 }
 
 module.exports = { PostgresGraphStore };

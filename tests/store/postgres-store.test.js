@@ -91,4 +91,45 @@ describe('PostgresGraphStore', () => {
     expect(newFile.valid_from_commit_id).toBe(commitId2);
     expect(newFile.valid_to_commit_id).toBeNull();
   });
+
+  test('updateSymbols handles invalidation and creation correctly', async () => {
+    const commitId1 = await store.addCommit(repoId, 'sym-1', 'msg');
+    const commitId2 = await store.addCommit(repoId, 'sym-2', 'msg2');
+    const fileId = await store.updateFile(repoId, commitId1, '/syms.js', 'hashX', 'javascript');
+
+    const initialSymbols = [{
+      qualified_name: 'funcA',
+      name: 'funcA',
+      kind: 'function',
+      symbol_hash: 'hashA1',
+      start_line: 1, end_line: 5, start_column: 1, end_column: 10
+    }];
+
+    await store.updateSymbols(repoId, commitId1, fileId, initialSymbols);
+
+    // Assert symbol exists and is open
+    let activeSymbols = await db.selectFrom('symbols').where('repository_id', '=', repoId).where('valid_to_commit_id', 'is', null).selectAll().execute();
+    expect(activeSymbols).toHaveLength(1);
+    expect(activeSymbols[0].symbol_hash).toBe('hashA1');
+
+    // Update symbol: hash changes (simulating code edit inside funcA)
+    const modifiedSymbols = [{
+      qualified_name: 'funcA',
+      name: 'funcA',
+      kind: 'function',
+      symbol_hash: 'hashA2',
+      start_line: 1, end_line: 6, start_column: 1, end_column: 10
+    }];
+
+    await store.updateSymbols(repoId, commitId2, fileId, modifiedSymbols);
+
+    activeSymbols = await db.selectFrom('symbols').where('repository_id', '=', repoId).where('valid_to_commit_id', 'is', null).selectAll().execute();
+    expect(activeSymbols).toHaveLength(1);
+    expect(activeSymbols[0].symbol_hash).toBe('hashA2');
+
+    const oldSymbols = await db.selectFrom('symbols').where('repository_id', '=', repoId).where('valid_to_commit_id', 'is not', null).selectAll().execute();
+    expect(oldSymbols).toHaveLength(1);
+    expect(oldSymbols[0].symbol_hash).toBe('hashA1');
+    expect(oldSymbols[0].valid_to_commit_id).toBe(commitId2);
+  });
 });
