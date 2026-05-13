@@ -132,4 +132,35 @@ describe('PostgresGraphStore', () => {
     expect(oldSymbols[0].symbol_hash).toBe('hashA1');
     expect(oldSymbols[0].valid_to_commit_id).toBe(commitId2);
   });
+
+  test('invalidating a symbol also invalidates connected edges', async () => {
+    const c1 = await store.addCommit(repoId, 'edge-1', 'msg');
+    const f1 = await store.updateFile(repoId, c1, '/a.js', 'hA', 'javascript');
+    
+    await store.updateSymbols(repoId, c1, f1, [
+      { qualified_name: 'A', name: 'A', kind: 'class', symbol_hash: 'A1', start_line:1, end_line:1, start_column:1, end_column:1 },
+      { qualified_name: 'B', name: 'B', kind: 'class', symbol_hash: 'B1', start_line:2, end_line:2, start_column:1, end_column:1 }
+    ]);
+
+    const syms = await db.selectFrom('symbols').where('repository_id', '=', repoId).where('valid_to_commit_id', 'is', null).selectAll().execute();
+    const idA = syms.find(s => s.name === 'A').id;
+    const idB = syms.find(s => s.name === 'B').id;
+
+    await store.updateEdges(repoId, c1, [{
+      from_symbol_id: idA, to_symbol_id: idB, type: 'CALLS', confidence: 1.0, discovered_by: 'AST', edge_hash: 'edge1'
+    }]);
+
+    // Now commit 2 updates Symbol A
+    const c2 = await store.addCommit(repoId, 'edge-2', 'msg2');
+    
+    await store.updateSymbols(repoId, c2, f1, [
+      { qualified_name: 'A', name: 'A', kind: 'class', symbol_hash: 'A2', start_line:1, end_line:1, start_column:1, end_column:1 },
+      { qualified_name: 'B', name: 'B', kind: 'class', symbol_hash: 'B1', start_line:2, end_line:2, start_column:1, end_column:1 }
+    ]);
+
+    // Edges connected to old 'A' must be invalidated
+    const oldEdges = await db.selectFrom('edges').where('valid_to_commit_id', 'is not', null).selectAll().execute();
+    expect(oldEdges).toHaveLength(1);
+    expect(oldEdges[0].valid_to_commit_id).toBe(c2);
+  });
 });

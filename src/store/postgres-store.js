@@ -116,6 +116,16 @@ class PostgresGraphStore {
           .set({ valid_to_commit_id: currentCommitId })
           .where('id', 'in', symbolsToClose)
           .execute();
+
+        // ** NEW: Also close affected edges **
+        await trx.updateTable('edges')
+          .set({ valid_to_commit_id: currentCommitId })
+          .where((eb) => eb.or([
+            eb('from_symbol_id', 'in', symbolsToClose),
+            eb('to_symbol_id', 'in', symbolsToClose)
+          ]))
+          .where('valid_to_commit_id', 'is', null)
+          .execute();
       }
 
       // 3. Identify which new symbols to insert
@@ -137,6 +147,17 @@ class PostgresGraphStore {
     });
   }
 
+  async updateEdges(repositoryId, currentCommitId, newEdges) {
+    if (newEdges.length === 0) return;
+    
+    const edgesToInsert = newEdges.map(e => ({
+      repository_id: repositoryId,
+      valid_from_commit_id: currentCommitId,
+      ...e
+    }));
+
+    await this.db.insertInto('edges').values(edgesToInsert).execute();
+  }
 }
 
 module.exports = { PostgresGraphStore };
