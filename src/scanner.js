@@ -86,7 +86,9 @@ async function runScan(projectRoot, config, mcpMode = false) {
       
       snapshot.files.forEach(f => {
         (f.imports||[]).forEach(im => {
-          const matchPath = resolveImport(f.path, im, allFiles, projectRoot);
+          const importSource = typeof im === 'string' ? im : (im && im.source ? im.source : null);
+          if (!importSource) return;
+          const matchPath = resolveImport(f.path, importSource, allFiles, projectRoot);
           if (matchPath) {
             importLinks.push({ source: f.path, target: matchPath, type: "IMPORTS" });
           }
