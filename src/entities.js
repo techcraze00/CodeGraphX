@@ -1,6 +1,7 @@
 const { parseFile } = require('./parser');
 const { getAdapterForFile } = require('./languages');
 
+
 class SymbolEntity {
   constructor({ id, name, type, file, scope, startPosition, calls, ontology }) {
     this.id = id;

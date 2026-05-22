@@ -10,6 +10,7 @@ const path = require('path');
  * @returns {string|null} - Resolved relative path to the imported file, or null
  */
 function resolveImport(importerFile, importString, allKnownFiles, projectRoot) {
+  if (typeof importString !== 'string') return null;
   let normalizedSource = importString;
   // Normalize Python relative imports (.utils -> ./utils)
   if (importString.startsWith('.') && !importString.startsWith('./') && !importString.startsWith('../')) {
