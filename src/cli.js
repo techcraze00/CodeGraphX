@@ -278,27 +278,27 @@ program
 program
   .command('stats')
   .description('Print codebase/symbol/edge stats summary to console')
-  .action(() => {
-    const fs = require('fs');
-    const path = require('path');
-    const outputDir = path.join(process.cwd(), '.codegraphx');
-    const jsonFile = path.join(outputDir, 'codebase.json');
-    const fallback = path.join(outputDir, 'custom_codebase.json');
-    let cgData;
-    if (fs.existsSync(jsonFile))
-      cgData = JSON.parse(fs.readFileSync(jsonFile));
-    else if (fs.existsSync(fallback))
-      cgData = JSON.parse(fs.readFileSync(fallback));
-    else {
-      console.error('No codebase.json found. Run `codegraphx scan` first.');
+  .action(async () => {
+    const { db } = require('./db');
+    try {
+      const fileCountRes = await db.selectFrom('files').select(db.fn.count('id').as('count')).where('valid_to_commit_id', 'is', null).executeTakeFirst();
+      const symbolCountRes = await db.selectFrom('symbols').select(db.fn.count('id').as('count')).where('valid_to_commit_id', 'is', null).executeTakeFirst();
+      const funcCountRes = await db.selectFrom('symbols').select(db.fn.count('id').as('count')).where('kind', '=', 'function').where('valid_to_commit_id', 'is', null).executeTakeFirst();
+      const classCountRes = await db.selectFrom('symbols').select(db.fn.count('id').as('count')).where('kind', '=', 'class').where('valid_to_commit_id', 'is', null).executeTakeFirst();
+      const edgeCountRes = await db.selectFrom('edges').select(db.fn.count('id').as('count')).where('valid_to_commit_id', 'is', null).executeTakeFirst();
+
+      const fileCount = fileCountRes ? fileCountRes.count : 0;
+      const symbolCount = symbolCountRes ? symbolCountRes.count : 0;
+      const funcCount = funcCountRes ? funcCountRes.count : 0;
+      const classCount = classCountRes ? classCountRes.count : 0;
+      const edgeCount = edgeCountRes ? edgeCountRes.count : 0;
+
+      console.log(`CodeGraphX Stats:\n  Files: ${fileCount}\n  Symbols: ${symbolCount}\n    - Functions: ${funcCount}\n    - Classes: ${classCount}\n  Edges: ${edgeCount}`);
+      process.exit(0);
+    } catch (e) {
+      console.error('Error fetching stats from database:', e.message);
       process.exit(1);
     }
-    const fileCount = cgData.files.length;
-    const symbolCount = cgData.files.reduce((n,f)=>n+(f.symbols?.length||0),0);
-    const classCount = cgData.files.reduce((n,f)=>n+(f.symbols?.filter(s=>s.type==="class").length||0),0);
-    const funcCount = cgData.files.reduce((n,f)=>n+(f.symbols?.filter(s=>s.type==="function").length||0),0);
-    const edgeCount = cgData.edges.length;
-    console.log(`CodeGraphX Stats:\n  Files: ${fileCount}\n  Symbols: ${symbolCount}\n    - Functions: ${funcCount}\n    - Classes: ${classCount}\n  Edges: ${edgeCount}`);
   });
 
 program
