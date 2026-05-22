@@ -9,7 +9,7 @@ function buildEdges(files, projectRoot) {
   
   // 1. Register all symbols
   files.forEach(f => {
-    (f.declaredSymbols || []).forEach(s => {
+    (f.symbols || []).forEach(s => {
       registry.registerSymbol({
           symbol_id: s.id,
           name: s.name,
@@ -24,7 +24,7 @@ function buildEdges(files, projectRoot) {
   // 2. Build CALLS edges
   files.forEach(f => {
     const currentFilePath = f.path || f.file;
-    (f.declaredSymbols || []).forEach(s => {
+    (f.symbols || []).forEach(s => {
       if (!s.calls) return;
       
       s.calls.forEach(calleeName => {
@@ -32,7 +32,7 @@ function buildEdges(files, projectRoot) {
         let confidence = 0.5;
 
         // Step A: Check Local Scope
-        const localMatch = (f.declaredSymbols || []).find(sym => sym.name === calleeName);
+        const localMatch = (f.symbols || []).find(sym => sym.name === calleeName);
         if (localMatch) {
             resolvedTargetId = localMatch.id;
             confidence = 1.0;

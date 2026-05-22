@@ -22,7 +22,7 @@
     "chokidar": "^5.0.0",
     "commander": "^14.0.3",
     "dotenv": "^17.4.2",
-    "kysely": "^0.29.0",
+    "kysely": "^0.27.2",
     "pg": "^8.20.0",
     "tree-sitter": "0.21.1",
     "tree-sitter-css": "0.21.0",

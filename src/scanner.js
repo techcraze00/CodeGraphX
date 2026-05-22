@@ -3,6 +3,10 @@ const path = require('path');
 const fs = require('fs');
 const { findFiles, writeJSONSync, ensureDirSync, loadConfig } = require('./utils');
 const { GraphStore } = require('./store');
+const { PostgresGraphStore } = require('./store/postgres-store');
+const { db } = require('./db');
+const { computeHash } = require('./differ');
+const { extractEntities } = require('./entities');
 const { buildEdges } = require('./edgebuilder');
 const { Snapshot, FileEntity } = require('./entities');
 
@@ -29,11 +33,43 @@ async function runScan(projectRoot, config, mcpMode = false) {
   }
   
   const store = new GraphStore(projectRoot, config);
+  const pgStore = new PostgresGraphStore(db);
+  
+  // Use a fixed repo id for MVP or fetch from git
+  let repositoryId = 'e7a0b381-b3a8-4c49-a274-81e9d4385bd2'; // Default known ID
+  const repo = await db.selectFrom('repositories').selectAll().limit(1).executeTakeFirst();
+  if (repo) repositoryId = repo.id;
+  
+  const commitHash = 'test-hash-' + Date.now(); // Mock hash for now
+  const commitId = await pgStore.addCommit(repositoryId, commitHash, 'Scan', 'System');
   
   // Parse files incrementally
   for (const filepath of files) {
     try {
       const contents = fs.readFileSync(filepath, 'utf8');
+      const relPath = path.relative(projectRoot, filepath);
+      
+      // New Postgres logic: persist file
+      const newHash = computeHash(contents);
+      const ext = path.extname(filepath).substring(1) || 'text';
+      const fileId = await pgStore.updateFile(repositoryId, commitId, relPath, newHash, ext);
+      
+      const newEntities = await extractEntities(filepath, contents);
+      if (newEntities.symbols && newEntities.symbols.length > 0) {
+          // Format symbols for DB
+          const dbSymbols = newEntities.symbols.map(s => ({
+              name: s.name,
+              qualified_name: s.id || s.name,
+              kind: s.type, // DB uses 'kind' based on postgres-store.js
+              symbol_hash: computeHash(JSON.stringify(s)),
+              start_line: s.startPosition ? s.startPosition.row : 0,
+              end_line: s.endPosition ? s.endPosition.row : 0,
+              start_column: s.startPosition ? s.startPosition.column : 0,
+              end_column: s.endPosition ? s.endPosition.column : 0
+          }));
+          await pgStore.updateSymbols(repositoryId, commitId, fileId, dbSymbols);
+      }
+
       await store.updateFile(filepath, contents);
     } catch (err) {
       // Log to stderr for MCP compatibility
@@ -44,19 +80,47 @@ async function runScan(projectRoot, config, mcpMode = false) {
   
   const filesData = store.getFilesData();
   const edges = buildEdges(filesData);
-  
-  const snapshot = new Snapshot({
-    id: `snap-${Date.now()}`,
+
+  // New Postgres logic: persist edges
+  try {
+    const activeSymbols = await db.selectFrom('symbols')
+      .selectAll()
+      .where('repository_id', '=', repositoryId)
+      .where('valid_to_commit_id', 'is', null)
+      .execute();
+
+    const symMap = new Map(activeSymbols.map(s => [s.qualified_name, s.id]));
+    const dbEdges = edges.map(e => {
+      const fromId = symMap.get(e.from);
+      const toId = symMap.get(e.to);
+      if (fromId && toId) {
+        return {
+          repository_id: repositoryId,
+          from_symbol_id: fromId,
+          to_symbol_id: toId,
+          type: e.type,
+          confidence: 1.0,
+          discovered_by: 'AST',
+          edge_hash: computeHash(`${fromId}-${toId}-${e.type}`),
+          valid_from_commit_id: commitId
+        };
+      }
+      return null;
+    }).filter(Boolean);
+
+    if (dbEdges.length > 0) {
+      await db.insertInto('edges').values(dbEdges).execute();
+    }
+  } catch (e) {
+    if (!mcpMode) console.warn('[DB EDGES] Could not persist edges to Postgres:', e.message);
+    else process.stderr.write(`[CodeGraphX] DB Edge error: ${e.message}\n`);
+  }
+
+  const snapshot = new Snapshot({    id: `snap-${Date.now()}`,
     timestamp: Date.now(),
     files: filesData.map(f => new FileEntity(f)),
     edges: edges
   });
-
-  // Write main codebase JSON
-  writeJSONSync(outputFile, snapshot.toJSON());
-  store.saveCache();
-
-  // === BLOOM FILTER (critical for MCP check_symbol_exists) ===
   try {
     const { BloomFilter } = require('bloom-filters');
     const allSymbols = snapshot.files.flatMap(f => (f.symbols||[]).map(s => s.name).filter(Boolean));
@@ -86,9 +150,7 @@ async function runScan(projectRoot, config, mcpMode = false) {
       
       snapshot.files.forEach(f => {
         (f.imports||[]).forEach(im => {
-          const importSource = typeof im === 'string' ? im : (im && im.source ? im.source : null);
-          if (!importSource) return;
-          const matchPath = resolveImport(f.path, importSource, allFiles, projectRoot);
+          const matchPath = resolveImport(f.path, im, allFiles, projectRoot);
           if (matchPath) {
             importLinks.push({ source: f.path, target: matchPath, type: "IMPORTS" });
           }
