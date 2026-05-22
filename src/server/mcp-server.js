@@ -6,25 +6,15 @@ const {
   ListResourcesRequestSchema,
   ReadResourceRequestSchema
 } = require("@modelcontextprotocol/sdk/types.js");
-const { GraphStore } = require("../store");
+const { PostgresGraphStore } = require("../store/postgres-store");
+const { db } = require("../db");
 const { loadConfig, ensureDirSync } = require("../utils");
-const { buildEdges } = require("../edgebuilder");
 const fs = require("fs");
 const path = require("path");
 const { BloomFilter } = require("bloom-filters");
 
-// ── Logging helper ───────────────────────────────────────────────────────────
-// CRITICAL: In an MCP stdio server, stdout is owned 100% by the JSON-RPC
-// transport. Every log line must go to stderr. Never use console.log here.
 const log  = (...a) => process.stderr.write('[CodeGraphX] ' + a.join(' ') + '\n');
 const warn = (...a) => process.stderr.write('[CodeGraphX] WARN ' + a.join(' ') + '\n');
-
-// Sentinel message returned by tools when no graph data is present yet,
-// instead of crashing or returning empty results that confuse Gemini.
-const NO_GRAPH_MSG =
-  'CodeGraphX graph not initialised. ' +
-  'Please run `codegraphx scan` (or `npx codegraphx scan`) in your project ' +
-  'root and then restart Gemini CLI.';
 
 class CodeGraphXServer {
   constructor() {
@@ -35,16 +25,15 @@ class CodeGraphXServer {
 
     this.projectRoot = process.cwd();
     this.config = loadConfig(this.projectRoot);
-    this.store = new GraphStore(this.projectRoot, this.config);
-    this.graph = { files: [], edges: [], generatedAt: null };
-    this.bloom = null;
+    this.pgStore = new PostgresGraphStore(db);
+    this.repositoryId = null;
     this.graphReady = false;
+    this.bloom = null;
 
     this.setupTools();
     this.setupResources();
 
     this.server.onerror = (error) => {
-      // Route MCP SDK errors to stderr, never stdout
       process.stderr.write('[CodeGraphX] MCP Error: ' + error + '\n');
     };
 
@@ -54,103 +43,24 @@ class CodeGraphXServer {
     });
   }
 
-  // async initialize() {
-  //   log("Initializing MCP Server...");
-
-  //   this.graph.files = this.store.getFilesData();
-  //   this.graph.edges = buildCallEdges(this.graph.files);
-
-  //   const outputDir    = path.join(this.projectRoot, this.config.outputDir);
-  //   const codebasePath = path.join(outputDir, this.config.outputFile);
-
-  //   if (fs.existsSync(codebasePath)) {
-  //     try {
-  //       const data = JSON.parse(fs.readFileSync(codebasePath, "utf8"));
-  //       this.graph.generatedAt = data.generatedAt;
-  //     } catch (e) {
-  //       warn("Could not read generatedAt from codebase.json:", e.message);
-  //     }
-  //   }
-  //   if (!this.graph.generatedAt) {
-  //     this.graph.generatedAt = new Date().toISOString();
-  //   }
-
-  //   // Mark graph as ready only when we actually have data
-  //   this.graphReady = this.graph.files.length > 0;
-
-  //   if (!this.graphReady) {
-  //     warn("No files loaded — graph is empty.");
-  //     warn("Run `codegraphx scan` in the project root, then restart Gemini CLI.");
-  //   }
-
-  //   // Load Bloom Filter
-  //   const bloomPath = path.join(outputDir, "symbols.bloom");
-  //   if (fs.existsSync(bloomPath)) {
-  //     try {
-  //       const bloomData = JSON.parse(fs.readFileSync(bloomPath, "utf8"));
-  //       this.bloom = BloomFilter.fromJSON(bloomData);
-  //       log("Bloom filter loaded.");
-  //     } catch (e) {
-  //       warn("Failed to load Bloom filter:", e.message);
-  //     }
-  //   }
-
-  //   log(`Loaded ${this.graph.files.length} files and ${this.graph.edges.length} edges.`);
-  // }
-
-  // In src/server/mcp-server.js, replace the initialize() method:
-
   async initialize() {
-    log("Initializing MCP Server...");
-
-    // Try to load existing graph data first
-    this.graph.files = this.store.getFilesData();
+    log("Initializing MCP Server with Postgres...");
     
-    const outputDir = path.join(this.projectRoot, this.config.outputDir);
-    const codebasePath = path.join(outputDir, this.config.outputFile);
-
-    // Check if we have valid cached data
-    const hasCache = this.graph.files.length > 0 && fs.existsSync(codebasePath);
-    
-    if (hasCache) {
-      // Load edges and metadata from cache
-      this.graph.edges = buildEdges(this.graph.files);
-      try {
-        const data = JSON.parse(fs.readFileSync(codebasePath, "utf8"));
-        this.graph.generatedAt = data.generatedAt;
-      } catch (e) {
-        warn("Could not read generatedAt from codebase.json:", e.message);
+    try {
+      const repo = await db.selectFrom('repositories').selectAll().limit(1).executeTakeFirst();
+      if (repo) {
+        this.repositoryId = repo.id;
+        this.graphReady = true;
+        log(`Connected to repository: ${repo.name} (${repo.id})`);
+      } else {
+        warn("No repository found in database. Run 'codegraphx scan' first.");
       }
-    } else {
-      // === AUTO-HEAL: Graph empty or missing, trigger scan ===
-      warn("Graph not initialized or empty. Running auto-scan...");
-      try {
-        const { runScan } = require("../scanner");
-        const scanned = await runScan(this.projectRoot, this.config, true); // mcpMode=true for fast startup
-        this.graph.files = scanned.files;
-        this.graph.edges = scanned.edges;
-        this.graph.generatedAt = scanned.generatedAt;
-        log(`Auto-scan complete: ${this.graph.files.length} files, ${this.graph.edges.length} edges.`);
-      } catch (scanError) {
-        warn("Auto-scan failed:", scanError.message);
-        warn("Graph will remain empty. Run 'codegraphx scan' manually for full features.");
-      }
-    }
-    
-    if (!this.graph.generatedAt) {
-      this.graph.generatedAt = new Date().toISOString();
+    } catch (e) {
+      warn("Database connection failed during initialization:", e.message);
     }
 
-    // Mark graph as ready if we have data
-    this.graphReady = this.graph.files.length > 0;
-
-    if (!this.graphReady) {
-      warn("No files loaded — graph is empty.");
-      warn("Run `codegraphx scan` in the project root, then restart Gemini CLI.");
-    }
-
-    // Load Bloom Filter (or create if missing after auto-scan)
-    const bloomPath = path.join(outputDir, "symbols.bloom");
+    // Load Bloom Filter
+    const bloomPath = path.join(this.projectRoot, this.config.outputDir, "symbols.bloom");
     if (fs.existsSync(bloomPath)) {
       try {
         const bloomData = JSON.parse(fs.readFileSync(bloomPath, "utf8"));
@@ -159,50 +69,20 @@ class CodeGraphXServer {
       } catch (e) {
         warn("Failed to load Bloom filter:", e.message);
       }
-    } else if (this.graphReady) {
-      // Create bloom filter on-the-fly if missing but we have symbols
-      try {
-        const allSymbols = this.graph.files.flatMap(f => (f.symbols||[]).map(s => s.name).filter(Boolean));
-        if (allSymbols.length > 0) {
-          const { BloomFilter } = require("bloom-filters");
-          this.bloom = BloomFilter.from(allSymbols, 0.01);
-          // Save for next time
-          ensureDirSync(outputDir);
-          fs.writeFileSync(bloomPath, JSON.stringify(this.bloom.saveAsJSON()), "utf8");
-          log("Bloom filter created and saved.");
-        }
-      } catch (e) {
-        warn("Failed to create Bloom filter:", e.message);
-      }
     }
-
-    log(`Loaded ${this.graph.files.length} files and ${this.graph.edges.length} edges.`);
   }
 
-  // Helper: return a "not ready" response for tools when graph is empty
-  // _notReadyResponse() {
-  //   return {
-  //     content: [{ type: "text", text: NO_GRAPH_MSG }],
-  //     isError: true,
-  //   };
-  // }
-    // Helper: return a "not ready" response for tools when graph is empty
   _notReadyResponse(toolName) {
-    const hint = this.graphReady 
-      ? undefined 
-      : "Graph is initializing. If this persists, run `codegraphx scan` manually.";
-    
     return {
       content: [{ 
         type: "text", 
         text: JSON.stringify({
-          status: "initializing",
-          message: "CodeGraphX is building the code graph...",
-          hint,
+          status: "not_ready",
+          message: "CodeGraphX graph not initialized. Run 'codegraphx scan' first.",
           tool: toolName
         }, null, 2) 
       }],
-      isError: false, // Not an error, just initializing
+      isError: true,
     };
   }
 
@@ -216,27 +96,21 @@ class CodeGraphXServer {
         },
         {
           name: "list_files",
-          description: "List all files in the codebase with a summary of their contents.",
+          description: "List all files in the codebase.",
           inputSchema: {
             type: "object",
             properties: {
-              filter: {
-                type: "string",
-                description: "Optional substring filter for file paths.",
-              },
+              filter: { type: "string", description: "Optional substring filter for file paths." },
             },
           },
         },
         {
           name: "query_symbol",
-          description: "Get detailed information about a specific symbol (function, class, etc.).",
+          description: "Get detailed information about a specific symbol.",
           inputSchema: {
             type: "object",
             properties: {
-              name: {
-                type: "string",
-                description: "Symbol name. Use bare name or 'file::name' for exact matching.",
-              },
+              name: { type: "string", description: "Symbol name." },
             },
             required: ["name"],
           },
@@ -258,19 +132,9 @@ class CodeGraphXServer {
           inputSchema: {
             type: "object",
             properties: {
-              symbol: {
-                type: "string",
-                description: "Symbol to trace (name or 'file::name').",
-              },
-              direction: {
-                type: "string",
-                enum: ["upstream", "downstream"],
-                description: "'upstream' for callers, 'downstream' for callees.",
-              },
-              depth: {
-                type: "integer",
-                description: "Maximum depth to trace (default 3).",
-              },
+              symbol: { type: "string", description: "Symbol ID or name." },
+              direction: { type: "string", enum: ["upstream", "downstream"] },
+              depth: { type: "integer" },
             },
             required: ["symbol", "direction"],
           },
@@ -281,10 +145,7 @@ class CodeGraphXServer {
           inputSchema: {
             type: "object",
             properties: {
-              branch: {
-                type: "string",
-                description: "Branch or commit to diff against HEAD~1 (default: 'HEAD').",
-              },
+              branch: { type: "string", description: "Branch to diff (default: 'HEAD')." },
             },
           },
         },
@@ -295,226 +156,81 @@ class CodeGraphXServer {
       const { name, arguments: args } = request.params;
 
       if (name === "get_graph_status") {
-        const fileCount   = this.graph.files.length;
-        const symbolCount = this.graph.files.reduce((n, f) => n + (f.symbols?.length || 0), 0);
-        const edgeCount   = this.graph.edges.length;
-        const outputDir   = path.join(this.projectRoot, this.config.outputDir);
-        const initialized = fileCount > 0 && fs.existsSync(path.join(outputDir, this.config.outputFile));
-
+        if (!this.graphReady) return { content: [{ type: "text", text: "Not initialized" }] };
+        const fileCountRes = await db.selectFrom('files').select(db.fn.count('id').as('count')).where('valid_to_commit_id', 'is', null).executeTakeFirst();
         return {
           content: [{
             type: "text",
             text: JSON.stringify({
-              initialized,
-              graphReady: this.graphReady,
-              fileCount,
-              symbolCount,
-              edgeCount,
-              lastUpdated: this.graph.generatedAt,
-              hint: initialized ? undefined : "Run `codegraphx scan` then restart Gemini CLI.",
+              initialized: true,
+              repositoryId: this.repositoryId,
+              fileCount: fileCountRes?.count || 0
             }, null, 2),
           }],
         };
       }
-
-      // All remaining tools require graph data
-      // if (!this.graphReady) return this._notReadyResponse();
 
       if (!this.graphReady) return this._notReadyResponse(name);
 
       if (name === "list_files") {
-        const filter = args?.filter?.toLowerCase();
-        const files = this.graph.files
-          .filter(f => !filter || f.file.toLowerCase().includes(filter))
-          .map(f => ({
-            file: f.file,
-            summary: (f.symbols || [])
-              .filter(s => ['class', 'function'].includes(s.type))
-              .map(s => s.name)
-              .join(', ') || 'No main symbols'
-          }));
+        const query = db.selectFrom('files')
+          .select(['path as file'])
+          .where('repository_id', '=', this.repositoryId)
+          .where('valid_to_commit_id', 'is', null);
+        
+        if (args?.filter) {
+          query = query.where('path', 'like', `%${args.filter}%`);
+        }
 
-        return {
-          content: [{ type: "text", text: JSON.stringify(files, null, 2) }],
-        };
+        const files = await query.execute();
+        return { content: [{ type: "text", text: JSON.stringify(files, null, 2) }] };
       }
 
       if (name === "query_symbol") {
-        const symbolName = args?.name;
-        if (!symbolName) throw new Error("Symbol name is required");
+        const matches = await db.selectFrom('symbols as s')
+          .innerJoin('files as f', 's.file_id', 'f.id')
+          .selectAll('s')
+          .select('f.path as file_path')
+          .where('s.name', '=', args.name)
+          .where('s.valid_to_commit_id', 'is', null)
+          .execute();
 
-        let matches = [];
-        // Try exact ID match first via store index
-        const exactMatch = this.store.symbolIndex.get(symbolName);
-        if (exactMatch) {
-          matches.push(exactMatch);
-        } else {
-          // Fallback to name-based heuristic search
-          const searchName = symbolName.includes("::") ? symbolName.split("::").pop() : symbolName;
-          this.graph.files.forEach(f => {
-            (f.symbols || []).forEach(s => {
-              if (s.name === searchName) matches.push({ file: f.file, symbol: s });
-            });
-          });
-        }
-
-        if (matches.length === 0) {
-          return {
-            content: [{ type: "text", text: `No symbol named "${symbolName}" found.` }],
-            isError: true,
-          };
-        }
-
-        const results = matches.map(match => ({
-          file: match.file,
-          id: match.symbol.id,
-          type: match.symbol.type,
-          location: match.symbol.startPosition ? `row ${match.symbol.startPosition.row + 1}` : "unknown",
-          calls: match.symbol.calls || [],
-          called_by: match.symbol.called_by || [],
-          imports: match.symbol.imports || [],
-        }));
-
-        return {
-          content: [{ type: "text", text: JSON.stringify(results, null, 2) }],
-          isError: false,
-        };
+        return { content: [{ type: "text", text: JSON.stringify(matches, null, 2) }] };
       }
 
       if (name === "check_symbol_exists") {
-        const symbolName = args?.name;
-        if (!symbolName) throw new Error("Symbol name is required");
-
-        if (!this.bloom) {
-          return {
-            content: [{ type: "text", text: "Bloom filter not loaded. Cannot perform instant check." }],
-            isError: true,
-          };
-        }
-
+        if (!this.bloom) return { content: [{ type: "text", text: "Bloom filter not loaded" }], isError: true };
         return {
           content: [{
             type: "text",
             text: JSON.stringify({
-              name: symbolName,
-              exists: this.bloom.has(symbolName) ? "probable_yes" : "definite_no",
+              name: args.name,
+              exists: this.bloom.has(args.name) ? "probable_yes" : "definite_no",
             }, null, 2),
           }],
-          isError: false,
         };
       }
 
       if (name === "trace_impact") {
-        const { symbol: startSymbol, direction, depth = 3 } = args;
-        if (!startSymbol || !direction) throw new Error("Symbol and direction are required");
-
-        const findSymbol = (id) => {
-          // 1. Try exact ID lookup in symbol index
-          const indexed = this.store.symbolIndex.get(id);
-          if (indexed) return { ...indexed, id: indexed.symbol.id };
-
-          // 2. Fallback to file::name or bare name search
-          let filePath, symName;
-          if (id.includes("::")) {
-            const parts = id.split("::");
-            // If it has 4 parts, it might be an ID but not found in index.
-            // If it has 2 parts, it's file::name
-            if (parts.length === 2) {
-              filePath = parts[0];
-              symName  = parts[1];
-            } else {
-              symName = parts.pop();
-            }
-          } else {
-            symName = id;
-          }
-
-          for (const f of this.graph.files) {
-            if (filePath && f.file !== filePath) continue;
-            const symbol = (f.symbols || []).find(s => s.name === symName || s.id === id);
-            if (symbol) return { file: f.file, symbol, id: symbol.id };
-          }
-          return null;
-        };
-
-        const startNode = findSymbol(startSymbol);
-        if (!startNode) {
-          return {
-            content: [{ type: "text", text: `Symbol "${startSymbol}" not found.` }],
-            isError: true,
-          };
+        // Resolve symbol ID first if name given
+        let symbolId = args.symbol;
+        if (!symbolId.includes('-')) { // Heuristic: if no hyphen, it might be a name
+          const sym = await db.selectFrom('symbols')
+            .select('id')
+            .where('name', '=', args.symbol)
+            .where('valid_to_commit_id', 'is', null)
+            .executeTakeFirst();
+          if (sym) symbolId = sym.id;
         }
 
-        const visited = new Set();
-        const results = [];
-        const queue   = [{ id: startNode.id, depth: 0 }];
-        visited.add(startNode.id);
-
-        while (queue.length > 0) {
-          const { id, depth: currentDepth } = queue.shift();
-          const node = findSymbol(id);
-          if (!node) continue;
-
-          const rawNeighbors = direction === "downstream"
-            ? (node.symbol.calls || [])
-            : (node.symbol.called_by || []);
-
-          const neighbors = direction === "downstream"
-            ? rawNeighbors.map(calleeName => {
-                // Try to find an edge that matches this callee name from this source
-                const edge = this.graph.edges.find(
-                  e => e.from === node.id && (e.to === calleeName || e.to.endsWith(`::${calleeName}`))
-                );
-                return edge ? edge.to : calleeName;
-              })
-            : rawNeighbors;
-
-          results.push({
-            id: node.id,
-            depth: currentDepth,
-            type: node.symbol.type,
-            [direction === "downstream" ? "calls" : "called_by"]: neighbors
-          });
-
-          if (currentDepth < depth) {
-            for (const neighbor of neighbors) {
-              if (!visited.has(neighbor)) {
-                visited.add(neighbor);
-                queue.push({ id: neighbor, depth: currentDepth + 1 });
-              }
-            }
-          }
-        }
-
-        return {
-          content: [{
-            type: "text",
-            text: JSON.stringify({
-              startSymbol: startNode.id,
-              direction,
-              maxDepth: depth,
-              impactGraph: results
-            }, null, 2),
-          }],
-          isError: false,
-        };
+        const impact = await this.pgStore.traceImpact(this.repositoryId, symbolId, args.direction, args.depth || 3);
+        return { content: [{ type: "text", text: JSON.stringify(impact, null, 2) }] };
       }
 
       if (name === "get_session_diff") {
-        const branch = args?.branch || "HEAD";
         const { scanCommit } = require("../git/commit-scanner");
-        const summary = scanCommit(this.projectRoot, this.store, branch);
-
-        if (!summary) {
-          return {
-            content: [{ type: "text", text: "No changes found or not a git repository." }],
-            isError: true,
-          };
-        }
-
-        return {
-          content: [{ type: "text", text: JSON.stringify(summary, null, 2) }],
-        };
+        const summary = await scanCommit(this.projectRoot, this.pgStore, this.repositoryId, args.branch || "HEAD");
+        return { content: [{ type: "text", text: JSON.stringify(summary, null, 2) }] };
       }
 
       throw new Error(`Tool not found: ${name}`);
@@ -524,93 +240,18 @@ class CodeGraphXServer {
   setupResources() {
     this.server.setRequestHandler(ListResourcesRequestSchema, async () => ({
       resources: [
-        {
-          uri: "codegraphx://file-index",
-          name: "CodeGraphX File Index",
-          mimeType: "text/plain",
-          description: "One-liner summary of every file in the codebase."
-        },
-        {
-          uri: "codegraphx://changelog",
-          name: "CodeGraphX Changelog",
-          mimeType: "text/plain",
-          description: "Session and commit history of code changes."
-        }
+        { uri: "codegraphx://file-index", name: "File Index", mimeType: "application/json" },
+        { uri: "codegraphx://changelog", name: "Changelog", mimeType: "application/json" }
       ]
     }));
 
     this.server.setRequestHandler(ReadResourceRequestSchema, async (request) => {
-      const uri       = request.params.uri;
-      const outputDir = path.join(this.projectRoot, this.config.outputDir);
-
+      const uri = request.params.uri;
       if (uri === "codegraphx://file-index") {
-        let content = "";
-        const toonPath = path.join(outputDir, "file_index.toon");
-
-        if (fs.existsSync(toonPath)) {
-          try {
-            const { decode } = require("@toon-format/toon");
-            content = JSON.stringify(decode(fs.readFileSync(toonPath, "utf8")), null, 2);
-          } catch (e) {
-            warn("Failed to decode TOON file-index:", e.message);
-          }
-        }
-
-        if (!content) {
-          const codebasePath = path.join(outputDir, this.config.outputFile);
-          const customPath   = path.join(outputDir, "custom_codebase.json");
-          const fallback     = fs.existsSync(codebasePath) ? codebasePath
-                             : fs.existsSync(customPath)   ? customPath
-                             : null;
-          if (fallback) {
-            try {
-              const data = JSON.parse(fs.readFileSync(fallback, "utf8"));
-              content = JSON.stringify({
-                files: (data.files || []).map(f => ({
-                  file: f.file,
-                  summary: (f.symbols || [])
-                    .filter(s => ['class', 'function'].includes(s.type))
-                    .map(s => s.name)
-                    .join(', ') || 'No main symbols'
-                }))
-              }, null, 2);
-            } catch (e) {
-              warn("Fallback file-index read failed:", e.message);
-            }
-          }
-        }
-
-        return {
-          contents: [{
-            uri,
-            mimeType: "text/plain",
-            text: content || (this.graphReady ? "File index not available." : NO_GRAPH_MSG),
-          }]
-        };
+        const files = await db.selectFrom('files').select('path').where('valid_to_commit_id', 'is', null).execute();
+        return { contents: [{ uri, mimeType: "application/json", text: JSON.stringify(files) }] };
       }
-
-      if (uri === "codegraphx://changelog") {
-        let content = "";
-        const toonPath = path.join(outputDir, "CHANGELOG.toon");
-
-        if (fs.existsSync(toonPath)) {
-          try {
-            const { decode } = require("@toon-format/toon");
-            content = JSON.stringify(decode(fs.readFileSync(toonPath, "utf8")), null, 2);
-          } catch (e) {
-            warn("Failed to decode TOON changelog:", e.message);
-          }
-        }
-
-        return {
-          contents: [{
-            uri,
-            mimeType: "text/plain",
-            text: content || "Changelog not available.",
-          }]
-        };
-      }
-
+      // Add changelog if needed
       throw new Error(`Resource not found: ${uri}`);
     });
   }
@@ -618,18 +259,13 @@ class CodeGraphXServer {
   async run() {
     const transport = new StdioServerTransport();
     await this.server.connect(transport);
-    log("MCP Server running on stdio");
+    log("MCP Server running on stdio (Postgres mode)");
   }
 }
 
 if (require.main === module) {
   const server = new CodeGraphXServer();
-  server.initialize()
-    .then(() => server.run())
-    .catch((error) => {
-      process.stderr.write('[CodeGraphX] Fatal: ' + error.stack + '\n');
-      process.exit(1);
-    });
+  server.initialize().then(() => server.run());
 }
 
 module.exports = { CodeGraphXServer };

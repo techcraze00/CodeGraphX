@@ -1,4 +1,3 @@
-// src/store/postgres-store.js
 class PostgresGraphStore {
   constructor(db) {
     this.db = db;
@@ -19,12 +18,113 @@ class PostgresGraphStore {
     return row.id;
   }
 
+  async getSymbolsInFile(repositoryId, commitId, path) {
+    const commit = await this.db.selectFrom('commits').selectAll().where('id', '=', commitId).executeTakeFirstOrThrow();
+
+    return await this.db.selectFrom('symbols as s')
+      .innerJoin('files as f', 's.file_id', 'f.id')
+      .innerJoin('commits as c_from', 's.valid_from_commit_id', 'c_from.id')
+      .leftJoin('commits as c_to', 's.valid_to_commit_id', 'c_to.id')
+      .selectAll('s')
+      .where('s.repository_id', '=', repositoryId)
+      .where('f.path', '=', path)
+      .where('c_from.timestamp', '<=', commit.timestamp)
+      .where((eb) => eb.or([
+        eb('c_to.id', 'is', null),
+        eb('c_to.timestamp', '>', commit.timestamp)
+      ]))
+      .execute();
+  }
+
+  async getChangesInCommit(repositoryId, commitId) {
+    const added = await this.db.selectFrom('symbols')
+      .selectAll()
+      .where('repository_id', '=', repositoryId)
+      .where('valid_from_commit_id', '=', commitId)
+      .where((eb) => eb.not(
+        eb.exists(
+          eb.selectFrom('symbols as s2')
+            .select('s2.id')
+            .where('s2.repository_id', '=', repositoryId)
+            .whereRef('s2.qualified_name', '=', 'symbols.qualified_name')
+            .where('s2.valid_to_commit_id', '=', commitId)
+        )
+      ))
+      .execute();
+
+    const modified = await this.db.selectFrom('symbols')
+      .selectAll()
+      .where('repository_id', '=', repositoryId)
+      .where('valid_from_commit_id', '=', commitId)
+      .where((eb) => eb.exists(
+        eb.selectFrom('symbols as s2')
+          .select('s2.id')
+          .where('s2.repository_id', '=', repositoryId)
+          .whereRef('s2.qualified_name', '=', 'symbols.qualified_name')
+          .where('s2.valid_to_commit_id', '=', commitId)
+      ))
+      .execute();
+
+    const removed = await this.db.selectFrom('symbols')
+      .selectAll()
+      .where('repository_id', '=', repositoryId)
+      .where('valid_to_commit_id', '=', commitId)
+      .where((eb) => eb.not(
+        eb.exists(
+          eb.selectFrom('symbols as s2')
+            .select('s2.id')
+            .where('s2.repository_id', '=', repositoryId)
+            .whereRef('s2.qualified_name', '=', 'symbols.qualified_name')
+            .where('s2.valid_from_commit_id', '=', commitId)
+        )
+      ))
+      .execute();
+
+    return { added, modified, removed };
+  }
+
+  async traceImpact(repositoryId, symbolId, direction = 'downstream', maxDepth = 5) {
+    const { sql } = require('kysely');
+    
+    // Recursive CTE for impact tracing
+    // direction 'downstream' = follow to_symbol_id (callees)
+    // direction 'upstream' = follow from_symbol_id (callers)
+    const fromCol = direction === 'downstream' ? 'from_symbol_id' : 'to_symbol_id';
+    const toCol = direction === 'downstream' ? 'to_symbol_id' : 'from_symbol_id';
+
+    const result = await sql`
+      WITH RECURSIVE impact_graph AS (
+        -- Base case: the starting symbol
+        SELECT 
+          ${sql.id(toCol)} as symbol_id, 
+          1 as depth
+        FROM edges
+        WHERE ${sql.id(fromCol)} = ${symbolId}
+          AND repository_id = ${repositoryId}
+          AND valid_to_commit_id IS NULL
+
+        UNION
+
+        -- Recursive step
+        SELECT 
+          e.${sql.id(toCol)} as symbol_id, 
+          ig.depth + 1
+        FROM edges e
+        INNER JOIN impact_graph ig ON e.${sql.id(fromCol)} = ig.symbol_id
+        WHERE ig.depth < ${maxDepth}
+          AND e.repository_id = ${repositoryId}
+          AND e.valid_to_commit_id IS NULL
+      )
+      SELECT DISTINCT s.*
+      FROM symbols s
+      INNER JOIN impact_graph ig ON s.id = ig.symbol_id
+      WHERE s.valid_to_commit_id IS NULL
+    `.execute(this.db);
+
+    return result.rows;
+  }
+
   async getFilesAtCommit(repositoryId, commitId) {
-    // Note: To properly support historical queries when commits are UUIDs, 
-    // we would need timestamps or topological ordering. For MVP where we pass the exact boundary, 
-    // we assume the query looks for records valid from <= this commit's timestamp.
-    // However, since commits might not be easily ordered by UUID alone, we can do a simplified
-    // lookup by fetching the commit's timestamp and comparing.
     const commit = await this.db.selectFrom('commits').selectAll().where('id', '=', commitId).executeTakeFirstOrThrow();
 
     return await this.db.selectFrom('files as f')
@@ -42,16 +142,14 @@ class PostgresGraphStore {
 
   async updateFile(repositoryId, currentCommitId, path, contentHash, language) {
     return await this.db.transaction().execute(async (trx) => {
-      // 1. Ensure file blob exists
       await trx.insertInto('file_blobs')
         .values({
           content_hash: contentHash,
-          storage_type: 'local_fs' // default
+          storage_type: 'local_fs'
         })
         .onConflict((oc) => oc.column('content_hash').doNothing())
         .execute();
 
-      // 2. Look for open file record
       const activeFile = await trx.selectFrom('files')
         .selectAll()
         .where('repository_id', '=', repositoryId)
@@ -60,10 +158,9 @@ class PostgresGraphStore {
         .executeTakeFirst();
 
       if (activeFile && activeFile.content_hash === contentHash) {
-        return activeFile.id; // Unchanged
+        return activeFile.id;
       }
 
-      // 3. Invalidate old file
       if (activeFile) {
         await trx.updateTable('files')
           .set({ valid_to_commit_id: currentCommitId })
@@ -71,7 +168,6 @@ class PostgresGraphStore {
           .execute();
       }
 
-      // 4. Insert new file record
       const newFile = await trx.insertInto('files')
         .values({
           repository_id: repositoryId,
@@ -89,7 +185,6 @@ class PostgresGraphStore {
 
   async updateSymbols(repositoryId, currentCommitId, fileId, newSymbols) {
     return await this.db.transaction().execute(async (trx) => {
-      // Get currently active symbols for this file
       const activeSymbols = await trx.selectFrom('symbols')
         .selectAll()
         .where('file_id', '=', fileId)
@@ -102,7 +197,6 @@ class PostgresGraphStore {
       const symbolsToClose = [];
       const symbolsToInsert = [];
 
-      // 1. Identify which old symbols to close
       for (const oldSym of activeSymbols) {
         const newSym = newSymbolsMap.get(oldSym.qualified_name);
         if (!newSym || newSym.symbol_hash !== oldSym.symbol_hash) {
@@ -110,14 +204,12 @@ class PostgresGraphStore {
         }
       }
 
-      // 2. Close them
       if (symbolsToClose.length > 0) {
         await trx.updateTable('symbols')
           .set({ valid_to_commit_id: currentCommitId })
           .where('id', 'in', symbolsToClose)
           .execute();
 
-        // ** NEW: Also close affected edges **
         await trx.updateTable('edges')
           .set({ valid_to_commit_id: currentCommitId })
           .where((eb) => eb.or([
@@ -128,7 +220,6 @@ class PostgresGraphStore {
           .execute();
       }
 
-      // 3. Identify which new symbols to insert
       for (const newSym of newSymbols) {
         const oldSym = activeSymbolsMap.get(newSym.qualified_name);
         if (!oldSym || oldSym.symbol_hash !== newSym.symbol_hash) {

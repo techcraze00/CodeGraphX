@@ -163,4 +163,28 @@ describe('PostgresGraphStore', () => {
     expect(oldEdges).toHaveLength(1);
     expect(oldEdges[0].valid_to_commit_id).toBe(c2);
   });
+
+  test('getChangesInCommit identifies added, modified, and removed symbols', async () => {
+    const c1 = await store.addCommit(repoId, 'diff-1', 'Initial');
+    const f1 = await store.updateFile(repoId, c1, '/lib.js', 'h1', 'javascript');
+    
+    // Symbols in C1: A (func), B (func)
+    await store.updateSymbols(repoId, c1, f1, [
+      { qualified_name: 'A', name: 'A', kind: 'function', symbol_hash: 'hA1', start_line: 1, end_line: 5 },
+      { qualified_name: 'B', name: 'B', kind: 'function', symbol_hash: 'hB1', start_line: 10, end_line: 15 }
+    ]);
+
+    const c2 = await store.addCommit(repoId, 'diff-2', 'Update');
+    // Symbols in C2: A (modified), C (added), B (removed)
+    await store.updateSymbols(repoId, c2, f1, [
+      { qualified_name: 'A', name: 'A', kind: 'function', symbol_hash: 'hA2', start_line: 1, end_line: 6 }, // modified
+      { qualified_name: 'C', name: 'C', kind: 'function', symbol_hash: 'hC1', start_line: 20, end_line: 25 }  // added
+    ]);
+
+    const changes = await store.getChangesInCommit(repoId, c2);
+    
+    expect(changes.added.map(s => s.qualified_name)).toContain('C');
+    expect(changes.modified.map(s => s.qualified_name)).toContain('A');
+    expect(changes.removed.map(s => s.qualified_name)).toContain('B');
+  });
 });
