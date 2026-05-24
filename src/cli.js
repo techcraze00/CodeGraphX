@@ -271,4 +271,33 @@ program
     process.exit(0);
   });
 
+program
+  .command('verify')
+  .description('Verify task completion using graph evidence')
+  .requiredOption('--task <description>', 'The task description to verify')
+  .requiredOption('--commit <hash>', 'The commit hash containing the changes')
+  .action(async (options) => {
+    const { verifyTask } = require('./verifier');
+    const { PostgresGraphStore } = require('./store/postgres-store');
+    const { db } = require('./db');
+    
+    const pgStore = new PostgresGraphStore(db);
+    
+    const repo = await db.selectFrom('repositories').selectAll().limit(1).executeTakeFirst();
+    if (!repo) {
+       console.error('No repository found in database. Run scan first.');
+       process.exit(1);
+    }
+
+    const commitRow = await db.selectFrom('commits').selectAll().where('hash', '=', options.commit).executeTakeFirst();
+    if (!commitRow) {
+       console.error(`Commit ${options.commit} not found in graph database.`);
+       process.exit(1);
+    }
+
+    const result = await verifyTask(pgStore, repo.id, commitRow.id, options.task);
+    console.log(JSON.stringify(result, null, 2));
+    process.exit(0);
+  });
+
 program.parse(process.argv);
