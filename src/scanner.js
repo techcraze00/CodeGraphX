@@ -49,7 +49,15 @@ async function runScan(projectRoot, config, mcpMode = false) {
   }
   const repositoryId = repo.id;
   
-  const commitHash = 'scan-' + Date.now();
+  // Resolve real git commit hash if in a git repo
+  let commitHash = 'scan-' + Date.now();
+  try {
+    const { execSync } = require('child_process');
+    commitHash = execSync('git rev-parse HEAD', { cwd: projectRoot, encoding: 'utf8' }).trim();
+  } catch (e) {
+    // Fallback to timestamp if not a git repo
+  }
+
   const commitId = await pgStore.addCommit(repositoryId, commitHash, 'Manual Scan', 'System');
   
   // Parse files incrementally
