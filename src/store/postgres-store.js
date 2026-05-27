@@ -4,6 +4,14 @@ class PostgresGraphStore {
   }
 
   async addCommit(repositoryId, hash, message, author = 'System', branch = 'main') {
+    const existing = await this.db.selectFrom('commits')
+      .selectAll()
+      .where('hash', '=', hash)
+      .where('repository_id', '=', repositoryId)
+      .executeTakeFirst();
+      
+    if (existing) return existing.id;
+
     const row = await this.db.insertInto('commits')
       .values({
         repository_id: repositoryId,
