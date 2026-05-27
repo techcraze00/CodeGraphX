@@ -4,3 +4,4 @@ node_modules
 .codegraphxrc
 test/
 .worktrees/
+dummy-test-repo/
