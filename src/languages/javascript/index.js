@@ -89,6 +89,31 @@ class JavaScriptAdapter extends BaseAdapter {
         } else if (source) {
              imports.push({ localName: null, importedName: null, source });
         }
+      } else if (node.type === "variable_declarator") {
+        let nameNode = node.childForFieldName("name");
+        let valueNode = node.childForFieldName("value");
+        if (nameNode && valueNode && valueNode.type === "call_expression") {
+           let funcNode = valueNode.childForFieldName("function") || valueNode.child(0);
+           if (funcNode && funcNode.text === "require") {
+              let argsNode = valueNode.childForFieldName("arguments");
+              if (argsNode) {
+                 let strNode = argsNode.children.find(c => c.type === 'string');
+                 if (strNode) {
+                    let source = strNode.text.replace(/['"]/g, '');
+                    if (nameNode.type === 'identifier') {
+                        imports.push({ localName: nameNode.text, importedName: 'default', source });
+                    } else if (nameNode.type === 'object_pattern') {
+                        let props = nameNode.children.filter(c => c.type === 'shorthand_property_identifier_pattern');
+                        for (let prop of props) {
+                            imports.push({ localName: prop.text, importedName: prop.text, source });
+                        }
+                    } else {
+                        imports.push({ localName: null, importedName: null, source });
+                    }
+                 }
+              }
+           }
+        }
       }
 
       for (let i = node.childCount - 1; i >= 0; i--) {
