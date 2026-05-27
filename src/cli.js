@@ -18,7 +18,7 @@ async function runScan() {
   console.log('🔍 Scanning codebase...');
   const result = await doScan(projectRoot, config, false); 
   
-  console.log(`✅ CodeGraph written to ${path.relative(projectRoot, path.join(config.outputDir, config.outputFile))}`);
+  console.log(`✅ CodeGraph outputs written to ${path.relative(projectRoot, config.outputDir)}`);
 }
 
 program
