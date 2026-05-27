@@ -986,8 +986,6 @@ function R(d){
 }
 
 function shortName(id){
-  if(!id) return 'unknown';
-  if(typeof id !== 'string') id = String(id);
   if(id.includes('::')){
     const p = id.split('::'); return p[p.length-1];
   }
@@ -995,7 +993,6 @@ function shortName(id){
 }
 
 function fileExt(id){
-  if(!id || typeof id !== 'string') return 'other';
   const m = id.match(/\.(\w+)$/);
   return m ? m[1] : 'other';
 }
@@ -1581,21 +1578,12 @@ function ws(){
 
 // ── Init ──────────────────────────────────────────────────────────────────────
 setTimeout(()=>{
-  try {
-    build();
-    renderSb('');
-  } catch (err) {
-    console.error('Failed to build graph:', err);
-    const loaderText = document.querySelector('.loader-text');
-    if (loaderText) loaderText.innerHTML = '<span style="color:var(--red)">Failed to build graph. Check console.</span>';
-  }
-  
+  build();
+  renderSb('');
   setTimeout(()=>{
     const ld = document.getElementById('loader');
-    if (ld) {
-      ld.classList.add('gone');
-      setTimeout(()=>ld.remove(), 520);
-    }
+    ld.classList.add('gone');
+    setTimeout(()=>ld.remove(), 520);
   }, 800);
 }, 30);
 

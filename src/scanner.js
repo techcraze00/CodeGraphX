@@ -35,13 +35,22 @@ async function runScan(projectRoot, config, mcpMode = false) {
   const store = new GraphStore(projectRoot, config);
   const pgStore = new PostgresGraphStore(db);
   
-  // Use a fixed repo id for MVP or fetch from git
-  let repositoryId = 'e7a0b381-b3a8-4c49-a274-81e9d4385bd2'; // Default known ID
-  const repo = await db.selectFrom('repositories').selectAll().limit(1).executeTakeFirst();
-  if (repo) repositoryId = repo.id;
+  // Ensure a repository exists in the database
+  let repo = await db.selectFrom('repositories').selectAll().limit(1).executeTakeFirst();
+  if (!repo) {
+    console.log('No repository found in database. Creating default entry...');
+    repo = await db.insertInto('repositories')
+      .values({
+        name: path.basename(projectRoot),
+        path: projectRoot
+      })
+      .returningAll()
+      .executeTakeFirstOrThrow();
+  }
+  const repositoryId = repo.id;
   
-  const commitHash = 'test-hash-' + Date.now(); // Mock hash for now
-  const commitId = await pgStore.addCommit(repositoryId, commitHash, 'Scan', 'System');
+  const commitHash = 'scan-' + Date.now();
+  const commitId = await pgStore.addCommit(repositoryId, commitHash, 'Manual Scan', 'System');
   
   // Parse files incrementally
   for (const filepath of files) {
@@ -137,10 +146,12 @@ async function runScan(projectRoot, config, mcpMode = false) {
     // === D3-FORCE GRAPH OUTPUT ===
     try {
       const d3Nodes = [];
+      const defineLinks = [];
       snapshot.files.forEach(f => {
         d3Nodes.push({ id: f.path, type: "file" });
         (f.symbols||[]).forEach(s => {
           d3Nodes.push({ id: s.id, type: s.type||"symbol", file: f.path });
+          defineLinks.push({ source: f.path, target: s.id, type: "DEFINED_IN" });
         });
       });
       const callLinks = snapshot.edges.map(edge => ({ source: edge.from, target: edge.to, type: edge.type }));
@@ -156,7 +167,17 @@ async function runScan(projectRoot, config, mcpMode = false) {
           }
         });
       });
-      const d3Graph = { nodes: d3Nodes, links: [...callLinks, ...importLinks] };
+      const rawLinks = [...callLinks, ...importLinks, ...defineLinks];
+      const validNodeIds = new Set(d3Nodes.map(n => n.id));
+      const filteredLinks = rawLinks.filter(l => {
+        if (!validNodeIds.has(l.source) || !validNodeIds.has(l.target)) {
+          // Skip broken links that would crash D3
+          return false;
+        }
+        return true;
+      });
+
+      const d3Graph = { nodes: d3Nodes, links: filteredLinks };
       fs.writeFileSync(path.join(outputDir, 'codegraph-graph.json'), JSON.stringify(d3Graph, null, 2), 'utf8');
     } catch (e) {
       console.warn('[GRAPH GEN] Could not write codegraph-graph.json:', e.message);
@@ -195,9 +216,11 @@ async function runScan(projectRoot, config, mcpMode = false) {
       };
       try {
         const { scanCommit } = require('./git/commit-scanner');
-        const gitSummary = scanCommit(projectRoot, store, 'HEAD');
+        const gitSummary = await scanCommit(projectRoot, pgStore, repositoryId, 'HEAD');
         if (gitSummary) changelogData.sessions.push(gitSummary.toJSON());
-      } catch(e) {}
+      } catch(e) {
+        console.warn('[COMMIT SCAN] Error scanning git commit:', e.message);
+      }
       
       const changelogToon = encode(changelogData);
       fs.writeFileSync(path.join(outputDir, 'CHANGELOG.toon'), changelogToon, 'utf8');
