@@ -39,6 +39,18 @@ class JavaScriptAdapter extends BaseAdapter {
           calls: this.extractCalls(node, contents),
           ontology: []
         });
+      } else if (node.type === "variable_declarator") {
+        const nameNode = node.childForFieldName("name");
+        const valueNode = node.childForFieldName("value");
+        if (nameNode && valueNode && (valueNode.type === "arrow_function" || valueNode.type === "function_expression")) {
+           symbols.push({
+             type: "function",
+             name: nameNode.text,
+             startPosition: node.startPosition,
+             calls: this.extractCalls(valueNode, contents),
+             ontology: []
+           });
+        }
       }
 
       for (let i = node.childCount - 1; i >= 0; i--) {
