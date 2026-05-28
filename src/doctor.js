@@ -1,39 +1,67 @@
 const path = require('path');
+const { execSync } = require('child_process');
+
+// ── Cache for dynamic built-ins ──────────────────────────────────────────
+let cachedBuiltins = null;
+
+function getBuiltins() {
+  if (cachedBuiltins) return cachedBuiltins;
+
+  const builtins = new Set([
+    // Manual additions for common symbols that might not be in dir(builtins)
+    // but are effectively standard or very common.
+    'Path', 'AsyncMock', 'MagicMock', 'Mock', 'patch', 'PropertyMock',
+    'call', 'ANY', 'DEFAULT', 'sentinel',
+    'auto', 'Enum', 'IntEnum', 'StrEnum', 'Flag', 'IntFlag',
+    'deque', 'defaultdict', 'namedtuple', 'OrderedDict', 'Counter',
+    'dataclass', 'field', 'fields', 'asdict', 'astuple', 'make_dataclass',
+    'List', 'Dict', 'Set', 'Tuple', 'Optional', 'Union', 'Any', 'Callable', 'Iterable', 'Iterator',
+    'TypedDict', 'Literal', 'Protocol', 'runtime_checkable', 'Annotated', 'Final', 'ClassVar',
+  ]);
+
+  // Python built-ins and standard library modules
+  try {
+    const pyCmd = 'python3 -c "import builtins, sys; std = sys.stdlib_module_names if hasattr(sys, \'stdlib_module_names\') else []; print(\',\'.join(dir(builtins) + list(std)))"';
+    const pyOutput = execSync(pyCmd, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] });
+    pyOutput.split(',').forEach(b => builtins.add(b.trim()));
+  } catch (e) {
+    // Graceful fallback if python3 is not available
+  }
+
+  // Node.js/JS globals and built-in modules
+  try {
+    const jsCmd = 'node -e "const builtin = require(\'module\').builtinModules; console.log(Object.getOwnPropertyNames(global).concat(builtin).join(\',\'))"';
+    const jsOutput = execSync(jsCmd, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] });
+    jsOutput.split(',').forEach(b => builtins.add(b.trim()));
+  } catch (e) {
+    // Graceful fallback if node is not available
+  }
+
+  cachedBuiltins = builtins;
+  return builtins;
+}
 
 /**
- * Analyzes a parsed codebase for:
- *  1. Hard parse failures  (tree-sitter threw entirely, parseError present)
- *  2. Syntax errors        (partial tree with ERROR / MISSING nodes, syntaxErrors present)
- *  3. Missing imports      (local-looking imports that resolve to no known file)
- *  4. Unresolved calls     (call targets absent from the symbol graph)
- *
- * Requires the companion patches to entities.js and store.js so that
- * syntax-error node locations are collected and persisted into the cache.
- *
- * @param {Array}  filesData   - output of store.getFilesData()
- * @param {string} projectRoot - absolute path to project root (for relative display)
- * @returns {Object} report    - { summary, issues: { parseErrors[], syntaxErrors[], missingImports[], unresolvedCalls[] } }
+ * Analyzes a parsed codebase for issues.
  */
 function runDoctor(filesData, projectRoot) {
   // ── Build lookup structures ──────────────────────────────────────────────
 
   const knownFiles = new Set(filesData.map(f => f.file));
-
   const knownSymbolNames = new Set();
-  const symbolsByName = new Map();
+  const builtins = getBuiltins();
 
   for (const f of filesData) {
     for (const sym of f.symbols || []) {
       if (!sym.name) continue;
       knownSymbolNames.add(sym.name);
-      if (!symbolsByName.has(sym.name)) symbolsByName.set(sym.name, []);
-      symbolsByName.get(sym.name).push({ file: f.file, symbol: sym });
     }
   }
 
   // ── Helpers ──────────────────────────────────────────────────────────────
 
-  function resolveImport(importStr, fromFile) {
+  function resolveImport(importObj, fromFile) {
+    const importStr = typeof importObj === 'string' ? importObj : importObj.source;
     if (!importStr) return null;
     const exts = ['.py', '.js', '.ts', '.jsx', '.tsx'];
     const fromDir = path.dirname(fromFile);
@@ -66,34 +94,19 @@ function runDoctor(filesData, projectRoot) {
     return null;
   }
 
-  function looksLocal(importStr) {
+  function looksLocal(importObj, fromFile) {
+    const importStr = typeof importObj === 'string' ? importObj : importObj.source;
     if (!importStr) return false;
     if (importStr.startsWith('.')) return true;
-    if (!importStr.includes('.') && /^[a-zA-Z_]/.test(importStr)) {
-      const knownExternal = new Set([
-        'os', 'sys', 'path', 're', 'io', 'json', 'math', 'time', 'datetime',
-        'collections', 'itertools', 'functools', 'typing', 'abc', 'copy',
-        'hashlib', 'random', 'string', 'enum', 'dataclasses', 'contextlib',
-        'threading', 'subprocess', 'shutil', 'tempfile', 'glob', 'pathlib',
-        'logging', 'unittest', 'argparse', 'struct', 'socket', 'http',
-        'urllib', 'email', 'html', 'xml', 'csv', 'sqlite3', 'pickle',
-        'fs', 'child_process', 'crypto', 'https', 'net',
-        'stream', 'util', 'events', 'buffer', 'url', 'querystring',
-        'assert', 'cluster', 'dns', 'readline', 'repl', 'tls', 'zlib',
-        'react', 'vue', 'angular', 'express', 'lodash', 'axios', 'moment',
-        'jest', 'mocha', 'chai', 'webpack', 'babel', 'typescript',
-        'commander', 'chokidar', 'ws', 'dotenv', 'chalk', 'yargs',
-        'tree-sitter', 'bloom-filters',
-        'numpy', 'pandas', 'scipy', 'sklearn', 'tensorflow', 'torch',
-        'flask', 'django', 'fastapi', 'sqlalchemy', 'requests', 'pytest',
-        'pydantic', 'click', 'rich', 'aiohttp', 'asyncio', 'boto3',
-      ]);
-      if (knownExternal.has(importStr)) return false;
-      return true;
+
+    // Strict check: if it's a single segment, it's local only if we can resolve it.
+    if (!importStr.includes('.')) {
+      return !!resolveImport(importObj, fromFile);
     }
-    const firstSegment = importStr.split('.')[0];
+
+    const rootSegment = importStr.split('.')[0];
     for (const f of knownFiles) {
-      if (f.startsWith(firstSegment + '/') || f.startsWith(firstSegment + '.')) return true;
+      if (f.startsWith(rootSegment + '/') || f.startsWith(rootSegment + '.')) return true;
     }
     return false;
   }
@@ -104,50 +117,110 @@ function runDoctor(filesData, projectRoot) {
   const syntaxErrors    = [];
   const missingImports  = [];
   const unresolvedCalls = [];
+  const circularImports = [];
 
+  const depGraph = new Map();
   for (const f of filesData) {
-    const displayFile = f.file;
-
-    // 1. Hard parse failures (tree-sitter threw, tree is null)
-    if (f.parseError) {
-      parseErrors.push({
-        file: displayFile,
-        error: f.parseError,
-        severity: 'error',
-      });
-    }
-
-    // 2. Syntax errors (tree-sitter partial parse with ERROR / MISSING nodes)
-    //    Populated by the patched entities.js → collectSyntaxErrors().
-    for (const se of f.syntaxErrors || []) {
-      syntaxErrors.push({
-        file: displayFile,
-        line: se.line,        // 1-based
-        column: se.column,    // 0-based
-        nodeType: se.nodeType,
-        context: se.context || '',
-        severity: 'error',
-        message: `Syntax error at line ${se.line}:${se.column} — unexpected ${se.nodeType}${se.context ? ` near \`${se.context}\`` : ''}`,
-      });
-    }
-
-    // 3. Missing imports
+    const deps = new Set();
     for (const imp of f.imports || []) {
-      const resolved = resolveImport(imp, displayFile);
-      if (!resolved && looksLocal(imp)) {
-        missingImports.push({
-          file: displayFile,
-          import: imp,
+      const resolved = resolveImport(imp, f.file);
+      if (resolved) deps.add(resolved);
+    }
+    depGraph.set(f.file, deps);
+  }
+
+  const visited = new Set();
+  const recStack = new Set();
+  const currentPath = [];
+
+  function findCycles(node) {
+    visited.add(node);
+    recStack.add(node);
+    currentPath.push(node);
+
+    const neighbors = depGraph.get(node) || [];
+    for (const neighbor of neighbors) {
+      if (!visited.has(neighbor)) {
+        findCycles(neighbor);
+      } else if (recStack.has(neighbor)) {
+        const cycleStartIdx = currentPath.indexOf(neighbor);
+        const cycle = currentPath.slice(cycleStartIdx);
+        circularImports.push({
+          cycle: [...cycle, neighbor],
           severity: 'warning',
-          message: `Cannot resolve import "${imp}" — no matching file found in the graph`,
+          message: `Circular dependency detected: ${cycle.map(f => path.basename(f)).join(' -> ')} -> ${path.basename(neighbor)}`,
         });
       }
     }
 
-    // 4. Unresolved call targets
+    recStack.delete(node);
+    currentPath.pop();
+  }
+
+  for (const file of knownFiles) {
+    if (!visited.has(file)) {
+      findCycles(file);
+    }
+  }
+
+  for (const f of filesData) {
+    const displayFile = f.file;
+    const fileUnresolvedSeen = new Set();
+
+    const importedNames = new Set();
+    for (const imp of f.imports || []) {
+      if (imp.localName) importedNames.add(imp.localName);
+      const source = typeof imp === 'string' ? imp : imp.source;
+      if (source) {
+        source.split('.').forEach(seg => importedNames.add(seg));
+      }
+    }
+
+    if (f.parseError) {
+      parseErrors.push({ file: displayFile, error: f.parseError, severity: 'error' });
+    }
+
+    for (const se of f.syntaxErrors || []) {
+      syntaxErrors.push({
+        file: displayFile,
+        line: se.line,
+        column: se.column,
+        nodeType: se.nodeType,
+        context: se.context || '',
+        severity: 'error',
+        message: `Syntax error at line ${se.line}:${se.column} — unexpected ${se.nodeType}${se.context ? ` near \`${se.context}\` ` : ''}`,
+      });
+    }
+
+    for (const imp of f.imports || []) {
+      const resolved = resolveImport(imp, displayFile);
+      if (!resolved && looksLocal(imp, displayFile)) {
+        const importLabel = typeof imp === 'string' ? imp : (imp.source || imp.localName || 'unknown');
+        missingImports.push({
+          file: displayFile,
+          import: importLabel,
+          severity: 'warning',
+          message: `Cannot resolve import "${importLabel}" — no matching file found in the graph`,
+        });
+      }
+    }
+
     for (const sym of f.symbols || []) {
       for (const callee of sym.calls || []) {
+        if (builtins.has(callee)) continue;
+
+        const rootPart = callee.split('.')[0];
+        if (importedNames.has(rootPart) || importedNames.has(callee)) continue;
+
+        const issueKey = `${sym.name}:${callee}`;
+        if (fileUnresolvedSeen.has(issueKey)) continue;
+
+        if (callee.includes('.') && !knownSymbolNames.has(rootPart)) {
+          continue;
+        }
+
         if (!knownSymbolNames.has(callee)) {
+          fileUnresolvedSeen.add(issueKey);
           unresolvedCalls.push({
             file: displayFile,
             caller: sym.name,
@@ -160,11 +233,9 @@ function runDoctor(filesData, projectRoot) {
     }
   }
 
-  // ── Summary ──────────────────────────────────────────────────────────────
-
   const totalIssues =
     parseErrors.length + syntaxErrors.length +
-    missingImports.length + unresolvedCalls.length;
+    missingImports.length + unresolvedCalls.length + circularImports.length;
 
   const summary = {
     filesAnalyzed:   filesData.length,
@@ -174,18 +245,16 @@ function runDoctor(filesData, projectRoot) {
     syntaxErrors:    syntaxErrors.length,
     missingImports:  missingImports.length,
     unresolvedCalls: unresolvedCalls.length,
+    circularImports: circularImports.length,
     healthy: totalIssues === 0,
   };
 
   return {
     summary,
-    issues: { parseErrors, syntaxErrors, missingImports, unresolvedCalls },
+    issues: { parseErrors, syntaxErrors, missingImports, unresolvedCalls, circularImports },
   };
 }
 
-/**
- * Pretty-print the doctor report to console.
- */
 function printReport(report) {
   const { summary, issues } = report;
   const RESET  = '\x1b[0m';
@@ -204,10 +273,8 @@ function printReport(report) {
   console.log(`  Total issues    : ${summary.totalIssues === 0 ? GREEN + '0 ✅' + RESET : BOLD + summary.totalIssues + RESET}`);
   console.log();
 
-  // ── Hard Parse Errors ──
   if (issues.parseErrors.length > 0) {
     console.log(`${BOLD}${RED}❌  Parse Errors (${issues.parseErrors.length})${RESET}`);
-    console.log(`${DIM}   File could not be parsed at all — tree-sitter threw an exception.${RESET}`);
     for (const e of issues.parseErrors) {
       console.log(`  ${RED}•${RESET} ${BOLD}${e.file}${RESET}`);
       console.log(`    ${DIM}${e.error}${RESET}`);
@@ -215,32 +282,32 @@ function printReport(report) {
     console.log();
   }
 
-  // ── Syntax Errors ──
   if (issues.syntaxErrors.length > 0) {
     const byFile = {};
     for (const se of issues.syntaxErrors) {
       if (!byFile[se.file]) byFile[se.file] = [];
       byFile[se.file].push(se);
     }
-    const fileCount = Object.keys(byFile).length;
-    console.log(`${BOLD}${RED}🔴  Syntax Errors (${issues.syntaxErrors.length} in ${fileCount} file${fileCount !== 1 ? 's' : ''})${RESET}`);
-    console.log(`${DIM}   Tree-sitter parsed the file but found invalid syntax (ERROR / MISSING nodes).${RESET}`);
-
+    console.log(`${BOLD}${RED}🔴  Syntax Errors (${issues.syntaxErrors.length})${RESET}`);
     for (const [file, items] of Object.entries(byFile)) {
       console.log(`  ${RED}•${RESET} ${BOLD}${file}${RESET}`);
       for (const item of items) {
-        const loc     = `line ${item.line}:${item.column}`;
-        const snippet = item.context ? `  ${DIM}near \`${item.context}\`${RESET}` : '';
-        const kind    = item.nodeType === 'MISSING'
-          ? `${ORANGE}MISSING token${RESET}`
-          : `${RED}unexpected token${RESET}`;
-        console.log(`      ${kind} at ${loc}${snippet}`);
+        console.log(`      ${item.message}`);
       }
     }
     console.log();
   }
 
-  // ── Missing Imports ──
+  console.log(`${BOLD}${ORANGE}🔄  Circular Dependencies (${issues.circularImports.length})${RESET}`);
+  if (issues.circularImports.length > 0) {
+    for (const ci of issues.circularImports) {
+      console.log(`  ${ORANGE}•${RESET} ${ci.message}`);
+    }
+  } else {
+    console.log(`  ${DIM}None detected.${RESET}`);
+  }
+  console.log();
+
   if (issues.missingImports.length > 0) {
     console.log(`${BOLD}${YELLOW}⚠️   Missing / Unresolvable Imports (${issues.missingImports.length})${RESET}`);
     const byFile = {};
@@ -257,7 +324,6 @@ function printReport(report) {
     console.log();
   }
 
-  // ── Unresolved Calls ──
   if (issues.unresolvedCalls.length > 0) {
     console.log(`${BOLD}${CYAN}ℹ️   Unresolved Call Targets (${issues.unresolvedCalls.length})${RESET}`);
     const byFile = {};
@@ -274,13 +340,13 @@ function printReport(report) {
     console.log();
   }
 
-  // ── Final verdict ──
   if (summary.healthy) {
     console.log(`${GREEN}${BOLD}✅  Codebase looks healthy — no issues detected.${RESET}\n`);
   } else {
     const breakdown = [
       summary.parseErrors     > 0 ? `${RED}${summary.parseErrors} parse error(s)${RESET}`         : null,
       summary.syntaxErrors    > 0 ? `${RED}${summary.syntaxErrors} syntax error(s)${RESET}`        : null,
+      summary.circularImports > 0 ? `${ORANGE}${summary.circularImports} circular import(s)${RESET}` : null,
       summary.missingImports  > 0 ? `${YELLOW}${summary.missingImports} missing import(s)${RESET}` : null,
       summary.unresolvedCalls > 0 ? `${CYAN}${summary.unresolvedCalls} unresolved call(s)${RESET}` : null,
     ].filter(Boolean).join(', ');

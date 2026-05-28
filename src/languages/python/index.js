@@ -94,17 +94,27 @@ class PythonAdapter extends BaseAdapter {
         const mod = node.childForFieldName("module_name");
         const source = mod ? mod.text : null;
         if (source) {
+          // Handle both direct names and import_list (multiple names in parentheses or comma-separated)
+          const processNameNode = (n) => {
+            if (n.type === "dotted_name" || n.type === "identifier") {
+              results.push({ localName: n.text, importedName: n.text, source });
+            } else if (n.type === "aliased_import") {
+              const nameNode = n.childForFieldName("name");
+              const aliasNode = n.childForFieldName("alias");
+              if (nameNode && aliasNode) {
+                results.push({ localName: aliasNode.text, importedName: nameNode.text, source });
+              }
+            }
+          };
+
           for (let i = 0; i < node.childCount; i++) {
-            if (node.fieldNameForChild(i) === "name") {
-              const child = node.child(i);
-              if (child.type === "dotted_name") {
-                results.push({ localName: child.text, importedName: child.text, source });
-              } else if (child.type === "aliased_import") {
-                const nameNode = child.childForFieldName("name");
-                const aliasNode = child.childForFieldName("alias");
-                if (nameNode && aliasNode) {
-                  results.push({ localName: aliasNode.text, importedName: nameNode.text, source });
-                }
+            const field = node.fieldNameForChild(i);
+            const child = node.child(i);
+            if (field === "name") {
+              processNameNode(child);
+            } else if (child.type === "import_list") {
+              for (let j = 0; j < child.namedChildCount; j++) {
+                processNameNode(child.namedChild(j));
               }
             }
           }
@@ -133,16 +143,7 @@ class PythonAdapter extends BaseAdapter {
           }
         }
         if (name) {
-          // Push full name and also parts if dotted
           calls.push(name);
-          if (name.includes('.')) {
-            const parts = name.split('.');
-            let current = "";
-            for (const part of parts) {
-              current = current ? `${current}.${part}` : part;
-              calls.push(current);
-            }
-          }
         }
       }
       for (let i = node.namedChildCount - 1; i >= 0; i--) {

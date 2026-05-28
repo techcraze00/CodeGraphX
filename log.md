@@ -29,6 +29,12 @@
     - **Interrogation Engine (Task 4.4)**: Designed (and partially implemented) the Developer Interrogation Engine for generating technical follow-up questions.
     - **CLI Integration**: Added `cgx verify` command for automated engineering validation.
     - **Pipeline Integration**: Indexing pipeline in `src/scanner.js` now orchestrates AST, Inference, and Embedding passes.
+    - **Doctor Command Overhaul**: 
+        - **Dynamic Built-in Filtering**: Spawns runtime subprocesses (Python/Node) to identify language built-ins and stdlib modules.
+        - **Circular Dependency Detection**: Implemented DFS-based cycle detection in the file import graph.
+        - **Python Import Fix**: Hardened `PythonAdapter` to support `import_list` (grouped imports) and parentheses.
+        - **External Call Suppression**: Refined filtering to ignore calls originating from resolved external dependencies.
+        - **Reporting**: Added de-duplication and fixed terminal ANSI escape sequence rendering.
 
     ---
 

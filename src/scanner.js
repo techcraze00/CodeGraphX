@@ -95,6 +95,8 @@ async function runScan(projectRoot, config, mcpMode = false) {
     }
   }
   
+  store.saveCache();
+  
   const filesData = store.getFilesData();
   const edges = buildEdges(filesData);
 
@@ -268,6 +270,9 @@ Add to .gemini/mcp.json:
       }
     }
   }
+
+  // Ensure cache is saved for doctor and other tools
+  store.saveCache();
   
   return snapshot;
 }
