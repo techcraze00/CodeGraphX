@@ -36,18 +36,25 @@
         - **External Call Suppression**: Refined filtering to ignore calls originating from resolved external dependencies.
         - **Reporting**: Added de-duplication and fixed terminal ANSI escape sequence rendering.
 
+    ### Phase 5: Scrum Intelligence & Pure Tool Refactor (Completed)
+    - **Intelligence SDK**: Created `IntelligenceSDK` class to decouple core logic from CLI.
+    - **Pure Evidence API**: Refactored `verifyTask` to `getVerificationEvidence` for deterministic, LLM-agnostic JSON output.
+    - **GitHub Webhook Pipeline**: Implemented `src/server/webhook-handler.js` for automated PR/Push scanning.
+    - **Architecture Drift Detection**: Built a rule engine in `src/sdk/drift-detector.js` to detect illegal cross-layer dependencies.
+    - **ESM/Jest Fix**: Configured Babel to handle ESM-only dependencies (`kysely`) in the Jest test suite.
+
+    ### Phase 6: SQLite Portability & Skill Integration (Completed)
+    - **SQLite Backend**: Migrated default storage to `better-sqlite3` for zero-config npm portability.
+    - **Multi-Dialect Support**: Unified storage layer (`SqlGraphStore`) supporting both SQLite and Postgres.
+    - **Gemini Skill**: Created `using-cgx` Gemini Skill (`SKILL.md`) for proactive agentic discovery and impact analysis.
+    - **Portable ID Generation**: Moved UUID generation to application layer for dialect compatibility.
+
     ---
 
     ## ⏳ Remaining to be Implemented
 
-    ### Phase 5: Scrum Intelligence Integration (Next)
-    - **Intelligence SDK**: Package core methods into a clean SDK for the Open-Scrum backend.
-    - **GitHub Webhook Pipeline**: Trigger graph analysis on PR and push events.
-    - **AI Prompt Grounding**: Integrate actual LLM logic (Gemini) into the verifier using semantic context.
-    - **Scrum Dashboard**: Visualize verification results, risks, and architecture drift.
-
-    ### Phase 6: Cross-Language & Advanced Intel
+    ### Phase 7: Cross-Language & Advanced Intel
     - **Cross-Language Linking**: Connecting symbols across frontend (React/Next) and backend (Python/Node).
-    - **Architecture Drift Detection**: Real-time monitoring for forbidden imports or layer violations.
-    - **PR Review Automation**: Automatic impact report generation for Pull Requests.
+    - **PR Review Automation**: Automatic impact report generation for Pull Requests integrated with SDK.
+    - **Scrum Dashboard**: Integrated visualization for verification results and architectural health.
 
