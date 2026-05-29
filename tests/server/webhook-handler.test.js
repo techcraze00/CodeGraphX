@@ -33,7 +33,7 @@ describe('webhook-handler', () => {
   beforeEach(() => {
     mockSdk = {
       scanCommit: jest.fn().mockResolvedValue({ commitId: 'c1' }),
-      verifyTask: jest.fn().mockResolvedValue({ status: 'verified' }),
+      getVerificationEvidence: jest.fn().mockResolvedValue({ taskDescription: 'evidence' }),
     };
     Webhooks.mockClear();
   });
@@ -65,7 +65,7 @@ describe('webhook-handler', () => {
     await pushHandler(pushPayload);
     
     expect(mockSdk.scanCommit).toHaveBeenCalledWith(projectRoot, repositoryId, 'main');
-    expect(mockSdk.verifyTask).toHaveBeenCalledWith(repositoryId, 'c1', 'feat: add something');
+    expect(mockSdk.getVerificationEvidence).toHaveBeenCalledWith(repositoryId, 'c1', 'feat: add something');
   });
 
   test('handles pull_request opened event correctly', async () => {
@@ -86,7 +86,7 @@ describe('webhook-handler', () => {
     await prHandler(prPayload);
     
     expect(mockSdk.scanCommit).toHaveBeenCalledWith(projectRoot, repositoryId, 'feature-branch');
-    expect(mockSdk.verifyTask).toHaveBeenCalledWith(repositoryId, 'c1', 'PR Title');
+    expect(mockSdk.getVerificationEvidence).toHaveBeenCalledWith(repositoryId, 'c1', 'PR Title');
   });
 
   test('handles pull_request synchronize event correctly', async () => {
@@ -107,7 +107,7 @@ describe('webhook-handler', () => {
     await prHandler(prPayload);
     
     expect(mockSdk.scanCommit).toHaveBeenCalledWith(projectRoot, repositoryId, 'updated-branch');
-    expect(mockSdk.verifyTask).toHaveBeenCalledWith(repositoryId, 'c1', 'Updated PR Title');
+    expect(mockSdk.getVerificationEvidence).toHaveBeenCalledWith(repositoryId, 'c1', 'Updated PR Title');
   });
 
   test('logs error if scanCommit fails', async () => {

@@ -1,6 +1,6 @@
 const { IntelligenceSDK } = require('../../src/sdk/index');
 const { PostgresGraphStore } = require('../../src/store/postgres-store');
-const { verifyTask } = require('../../src/verifier');
+const { getVerificationEvidence } = require('../../src/verifier');
 const { scanCommit } = require('../../src/git/commit-scanner');
 
 jest.mock('../../src/store/postgres-store');
@@ -22,17 +22,17 @@ describe('IntelligenceSDK', () => {
     }
   });
 
-  test('verifyTask delegates to verifier.verifyTask', async () => {
+  test('getVerificationEvidence delegates to verifier.getVerificationEvidence', async () => {
     const repositoryId = 1;
     const commitId = 10;
     const taskDescription = 'Fix bug in auth';
-    const mockResult = { task_completed: true };
+    const mockResult = { taskDescription };
 
-    verifyTask.mockResolvedValue(mockResult);
+    getVerificationEvidence.mockResolvedValue(mockResult);
 
-    const result = await sdk.verifyTask(repositoryId, commitId, taskDescription);
+    const result = await sdk.getVerificationEvidence(repositoryId, commitId, taskDescription);
 
-    expect(verifyTask).toHaveBeenCalledWith(
+    expect(getVerificationEvidence).toHaveBeenCalledWith(
       expect.any(PostgresGraphStore),
       repositoryId,
       commitId,

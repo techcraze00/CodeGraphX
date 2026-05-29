@@ -1,8 +1,9 @@
 const { Kysely, PostgresDialect } = require('kysely');
 const { Pool } = require('pg');
 const { PostgresGraphStore } = require('../store/postgres-store');
-const { verifyTask } = require('../verifier');
+const { getVerificationEvidence } = require('../verifier');
 const { scanCommit } = require('../git/commit-scanner');
+const { detectDrift } = require('./drift-detector');
 
 class IntelligenceSDK {
   constructor(config = {}) {
@@ -23,8 +24,8 @@ class IntelligenceSDK {
     this.pgStore = new PostgresGraphStore(this.db);
   }
 
-  async verifyTask(repositoryId, commitId, taskDescription) {
-    return await verifyTask(this.pgStore, repositoryId, commitId, taskDescription);
+  async getVerificationEvidence(repositoryId, commitId, taskDescription) {
+    return await getVerificationEvidence(this.pgStore, repositoryId, commitId, taskDescription);
   }
 
   async scanCommit(projectRoot, repositoryId, branch = 'HEAD') {
@@ -33,6 +34,10 @@ class IntelligenceSDK {
 
   async traceImpact(repositoryId, symbolId, direction = 'downstream', maxDepth = 5) {
     return await this.pgStore.traceImpact(repositoryId, symbolId, direction, maxDepth);
+  }
+
+  async detectDrift(repositoryId, symbolId, symbolName, rules) {
+    return await detectDrift(this, repositoryId, symbolId, symbolName, rules);
   }
 
   async destroy() {

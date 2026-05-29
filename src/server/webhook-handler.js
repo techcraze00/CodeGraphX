@@ -19,7 +19,8 @@ function createWebhookMiddleware(secret, sdk, projectRoot, repositoryId) {
       
       if (payload.commits && payload.commits.length > 0) {
         const firstCommit = payload.commits[0];
-        await sdk.verifyTask(repositoryId, summary.commitId, firstCommit.message);
+        const evidence = await sdk.getVerificationEvidence(repositoryId, summary.commitId, firstCommit.message);
+        console.log('Generated Verification Evidence for AI consumption:', JSON.stringify(evidence));
       }
     } catch (error) {
       console.error('Error handling push event:', error);
@@ -32,7 +33,8 @@ function createWebhookMiddleware(secret, sdk, projectRoot, repositoryId) {
         const branch = payload.pull_request.head.ref;
         const summary = await sdk.scanCommit(projectRoot, repositoryId, branch);
         
-        await sdk.verifyTask(repositoryId, summary.commitId, payload.pull_request.title);
+        const evidence = await sdk.getVerificationEvidence(repositoryId, summary.commitId, payload.pull_request.title);
+        console.log('Generated Verification Evidence for AI consumption:', JSON.stringify(evidence));
       }
     } catch (error) {
       console.error('Error handling pull_request event:', error);
