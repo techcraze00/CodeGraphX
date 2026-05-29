@@ -16,7 +16,6 @@
     "cgx-mcp": "bin/cgx-mcp"
   },
   "dependencies": {
-    "@google/generative-ai": "^0.24.1",
     "@modelcontextprotocol/sdk": "^1.29.0",
     "@octokit/webhooks": "^14.2.0",
     "@toon-format/toon": "^2.1.0",

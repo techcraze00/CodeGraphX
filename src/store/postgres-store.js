@@ -123,9 +123,10 @@ class PostgresGraphStore {
           AND e.repository_id = ${repositoryId}
           AND e.valid_to_commit_id IS NULL
       )
-      SELECT DISTINCT s.*
+      SELECT DISTINCT s.*, f.path
       FROM symbols s
       INNER JOIN impact_graph ig ON s.id = ig.symbol_id
+      INNER JOIN files f ON s.file_id = f.id
       WHERE s.valid_to_commit_id IS NULL
     `.execute(this.db);
 

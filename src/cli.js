@@ -273,11 +273,11 @@ program
 
 program
   .command('verify')
-  .description('Verify task completion using graph evidence')
+  .description('Generate task verification evidence for an AI agent')
   .requiredOption('--task <description>', 'The task description to verify')
   .requiredOption('--commit <hash>', 'The commit hash containing the changes')
   .action(async (options) => {
-    const { verifyTask } = require('./verifier');
+    const { getVerificationEvidence } = require('./verifier');
     const { PostgresGraphStore } = require('./store/postgres-store');
     const { db } = require('./db');
     
@@ -295,7 +295,7 @@ program
        process.exit(1);
     }
 
-    const result = await verifyTask(pgStore, repo.id, commitRow.id, options.task);
+    const result = await getVerificationEvidence(pgStore, repo.id, commitRow.id, options.task);
     console.log(JSON.stringify(result, null, 2));
     process.exit(0);
   });

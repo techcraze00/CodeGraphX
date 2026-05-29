@@ -47,5 +47,6 @@ describe('Impact Tracing', () => {
     
     expect(names).toContain('B');
     expect(names).toContain('C');
+    expect(impact[0].path).toBe('/app.js');
   });
 });
