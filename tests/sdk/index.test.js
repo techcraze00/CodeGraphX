@@ -1,15 +1,15 @@
 const { IntelligenceSDK } = require('../../src/sdk/index');
-const { PostgresGraphStore } = require('../../src/store/postgres-store');
+const { SqlGraphStore } = require('../../src/store/sql-store');
 const { getVerificationEvidence } = require('../../src/verifier');
 const { scanCommit } = require('../../src/git/commit-scanner');
 
-jest.mock('../../src/store/postgres-store');
+jest.mock('../../src/store/sql-store');
 jest.mock('../../src/verifier');
 jest.mock('../../src/git/commit-scanner');
 
 describe('IntelligenceSDK', () => {
   let sdk;
-  const dbUri = 'postgresql://postgres:postgres@localhost:5432/testdb';
+  const dbUri = ':memory:';
 
   beforeEach(() => {
     jest.clearAllMocks();
@@ -33,7 +33,7 @@ describe('IntelligenceSDK', () => {
     const result = await sdk.getVerificationEvidence(repositoryId, commitId, taskDescription);
 
     expect(getVerificationEvidence).toHaveBeenCalledWith(
-      expect.any(PostgresGraphStore),
+      expect.any(SqlGraphStore),
       repositoryId,
       commitId,
       taskDescription
@@ -53,7 +53,7 @@ describe('IntelligenceSDK', () => {
 
     expect(scanCommit).toHaveBeenCalledWith(
       projectRoot,
-      expect.any(PostgresGraphStore),
+      expect.any(SqlGraphStore),
       repositoryId,
       branch
     );
@@ -67,11 +67,11 @@ describe('IntelligenceSDK', () => {
     const depth = 3;
     const mockResult = [{ id: 200 }];
 
-    sdk.pgStore.traceImpact.mockResolvedValue(mockResult);
+    sdk.sqlStore.traceImpact.mockResolvedValue(mockResult);
 
     const result = await sdk.traceImpact(repositoryId, symbolId, direction, depth);
 
-    expect(sdk.pgStore.traceImpact).toHaveBeenCalledWith(
+    expect(sdk.sqlStore.traceImpact).toHaveBeenCalledWith(
       repositoryId,
       symbolId,
       direction,

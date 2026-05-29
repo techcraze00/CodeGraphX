@@ -1,6 +1,6 @@
-const { db, closeDb } = require('../../src/db');
+const { db, closeDb, dialectType } = require('../../src/db');
 const { runMigrations } = require('../../src/db/migrator');
-const { PostgresGraphStore } = require('../../src/store/postgres-store');
+const { SqlGraphStore } = require('../../src/store/sql-store');
 const { sql } = require('kysely');
 
 describe('Impact Tracing', () => {
@@ -8,11 +8,24 @@ describe('Impact Tracing', () => {
   let repoId;
 
   beforeAll(async () => {
-    await sql`DROP SCHEMA public CASCADE; CREATE SCHEMA public;`.execute(db);
+    if (dialectType === 'postgres') {
+      await sql`DROP SCHEMA public CASCADE; CREATE SCHEMA public;`.execute(db);
+    } else {
+      const tables = ['unresolved_symbols', 'dependencies', 'embeddings', 'edges', 'symbols', 'files', 'file_blobs', 'index_jobs', 'commits', 'repositories', 'kysely_migration', 'kysely_migration_lock'];
+      for (const table of tables) {
+        await db.schema.dropTable(table).ifExists().execute();
+      }
+    }
     await runMigrations();
-    store = new PostgresGraphStore(db);
+    store = new SqlGraphStore(db);
     const repo = await db.insertInto('repositories')
-      .values({ name: 'impact-repo', path: '/test' })
+      .values({ 
+        id: require('crypto').randomUUID(),
+        name: 'impact-repo', 
+        path: '/test',
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString()
+      })
       .returning('id').executeTakeFirstOrThrow();
     repoId = repo.id;
   });

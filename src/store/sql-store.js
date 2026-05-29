@@ -1,4 +1,6 @@
-class PostgresGraphStore {
+const crypto = require('crypto');
+
+class SqlGraphStore {
   constructor(db) {
     this.db = db;
   }
@@ -12,18 +14,20 @@ class PostgresGraphStore {
       
     if (existing) return existing.id;
 
-    const row = await this.db.insertInto('commits')
+    const id = crypto.randomUUID();
+    await this.db.insertInto('commits')
       .values({
+        id,
         repository_id: repositoryId,
         hash,
         message,
         author,
-        branch
+        branch,
+        timestamp: new Date().toISOString()
       })
-      .returning('id')
-      .executeTakeFirstOrThrow();
+      .execute();
     
-    return row.id;
+    return id;
   }
 
   async getSymbolsInFile(repositoryId, commitId, path) {
@@ -95,14 +99,11 @@ class PostgresGraphStore {
     const { sql } = require('kysely');
     
     // Recursive CTE for impact tracing
-    // direction 'downstream' = follow to_symbol_id (callees)
-    // direction 'upstream' = follow from_symbol_id (callers)
     const fromCol = direction === 'downstream' ? 'from_symbol_id' : 'to_symbol_id';
     const toCol = direction === 'downstream' ? 'to_symbol_id' : 'from_symbol_id';
 
     const result = await sql`
       WITH RECURSIVE impact_graph AS (
-        -- Base case: the starting symbol
         SELECT 
           ${sql.id(toCol)} as symbol_id, 
           1 as depth
@@ -113,7 +114,6 @@ class PostgresGraphStore {
 
         UNION
 
-        -- Recursive step
         SELECT 
           e.${sql.id(toCol)} as symbol_id, 
           ig.depth + 1
@@ -177,18 +177,19 @@ class PostgresGraphStore {
           .execute();
       }
 
-      const newFile = await trx.insertInto('files')
+      const id = crypto.randomUUID();
+      await trx.insertInto('files')
         .values({
+          id,
           repository_id: repositoryId,
           path,
           content_hash: contentHash,
           language,
           valid_from_commit_id: currentCommitId
         })
-        .returning('id')
-        .executeTakeFirstOrThrow();
+        .execute();
 
-      return newFile.id;
+      return id;
     });
   }
 
@@ -233,6 +234,7 @@ class PostgresGraphStore {
         const oldSym = activeSymbolsMap.get(newSym.qualified_name);
         if (!oldSym || oldSym.symbol_hash !== newSym.symbol_hash) {
           symbolsToInsert.push({
+            id: crypto.randomUUID(),
             repository_id: repositoryId,
             file_id: fileId,
             valid_from_commit_id: currentCommitId,
@@ -251,6 +253,7 @@ class PostgresGraphStore {
     if (newEdges.length === 0) return;
     
     const edgesToInsert = newEdges.map(e => ({
+      id: crypto.randomUUID(),
       repository_id: repositoryId,
       valid_from_commit_id: currentCommitId,
       ...e
@@ -260,4 +263,4 @@ class PostgresGraphStore {
   }
 }
 
-module.exports = { PostgresGraphStore };
+module.exports = { SqlGraphStore };

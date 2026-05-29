@@ -1,22 +1,35 @@
-// tests/store/postgres-store.test.js
-const { db, closeDb } = require('../../src/db');
+// tests/store/sql-store.test.js
+const { db, closeDb, dialectType } = require('../../src/db');
 const { runMigrations } = require('../../src/db/migrator');
-const { PostgresGraphStore } = require('../../src/store/postgres-store');
+const { SqlGraphStore } = require('../../src/store/sql-store');
 const { sql } = require('kysely');
 
-describe('PostgresGraphStore', () => {
+describe('SqlGraphStore', () => {
   let store;
   let repoId;
 
   beforeAll(async () => {
     // Start fresh
-    await sql`DROP SCHEMA public CASCADE; CREATE SCHEMA public;`.execute(db);
+    if (dialectType === 'postgres') {
+        await sql`DROP SCHEMA public CASCADE; CREATE SCHEMA public;`.execute(db);
+    } else {
+        const tables = ['unresolved_symbols', 'dependencies', 'embeddings', 'edges', 'symbols', 'files', 'file_blobs', 'index_jobs', 'commits', 'repositories', 'kysely_migration', 'kysely_migration_lock'];
+        for (const table of tables) {
+          await db.schema.dropTable(table).ifExists().execute();
+        }
+    }
     await runMigrations();
-    store = new PostgresGraphStore(db);
+    store = new SqlGraphStore(db);
     
     // Setup base repo
     const repo = await db.insertInto('repositories')
-      .values({ name: 'test-repo', path: '/test' })
+      .values({ 
+        id: require('crypto').randomUUID(),
+        name: 'test-repo', 
+        path: '/test',
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString()
+      })
       .returning('id').executeTakeFirstOrThrow();
     repoId = repo.id;
   });
@@ -38,25 +51,29 @@ describe('PostgresGraphStore', () => {
     const commit2Id = await store.addCommit(repoId, 'commit2', 'Second commit');
 
     // Force distinct timestamps
-    await db.updateTable('commits').set({ timestamp: new Date(Date.now() - 10000) }).where('id', '=', commit1Id).execute();
-    await db.updateTable('commits').set({ timestamp: new Date() }).where('id', '=', commit2Id).execute();
+    await db.updateTable('commits').set({ timestamp: new Date(Date.now() - 10000).toISOString() }).where('id', '=', commit1Id).execute();
+    await db.updateTable('commits').set({ timestamp: new Date().toISOString() }).where('id', '=', commit2Id).execute();
 
     // Insert mock file, valid from commit1, valid to commit2 (closed)
-    await db.insertInto('file_blobs').values({ content_hash: 'hash1', storage_type: 'local' }).execute();
+    const blob1 = 'hash1';
+    await db.insertInto('file_blobs').values({ content_hash: blob1, storage_type: 'local' }).execute();
     await db.insertInto('files').values({
+      id: require('crypto').randomUUID(),
       repository_id: repoId,
       path: '/index.js',
-      content_hash: 'hash1',
+      content_hash: blob1,
       valid_from_commit_id: commit1Id,
       valid_to_commit_id: commit2Id
     }).execute();
 
     // Insert mock file, valid from commit2, open
-    await db.insertInto('file_blobs').values({ content_hash: 'hash2', storage_type: 'local' }).execute();
+    const blob2 = 'hash2';
+    await db.insertInto('file_blobs').values({ content_hash: blob2, storage_type: 'local' }).execute();
     await db.insertInto('files').values({
+      id: require('crypto').randomUUID(),
       repository_id: repoId,
       path: '/index.js',
-      content_hash: 'hash2',
+      content_hash: blob2,
       valid_from_commit_id: commit2Id,
       valid_to_commit_id: null
     }).execute();

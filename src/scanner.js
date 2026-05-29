@@ -3,7 +3,7 @@ const path = require('path');
 const fs = require('fs');
 const { findFiles, writeJSONSync, ensureDirSync, loadConfig } = require('./utils');
 const { GraphStore } = require('./store');
-const { PostgresGraphStore } = require('./store/postgres-store');
+const { SqlGraphStore } = require('./store/sql-store');
 const { db } = require('./db');
 const { computeHash } = require('./differ');
 const { extractEntities } = require('./entities');
@@ -33,7 +33,7 @@ async function runScan(projectRoot, config, mcpMode = false) {
   }
   
   const store = new GraphStore(projectRoot, config);
-  const pgStore = new PostgresGraphStore(db);
+  const pgStore = new SqlGraphStore(db);
   
   // Ensure a repository exists in the database
   let repo = await db.selectFrom('repositories').selectAll().limit(1).executeTakeFirst();
@@ -41,8 +41,11 @@ async function runScan(projectRoot, config, mcpMode = false) {
     console.log('No repository found in database. Creating default entry...');
     repo = await db.insertInto('repositories')
       .values({
+        id: require('crypto').randomUUID(),
         name: path.basename(projectRoot),
-        path: projectRoot
+        path: projectRoot,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString()
       })
       .returningAll()
       .executeTakeFirstOrThrow();
@@ -66,7 +69,7 @@ async function runScan(projectRoot, config, mcpMode = false) {
       const contents = fs.readFileSync(filepath, 'utf8');
       const relPath = path.relative(projectRoot, filepath);
       
-      // New Postgres logic: persist file
+      // New logic: persist file
       const newHash = computeHash(contents);
       const ext = path.extname(filepath).substring(1) || 'text';
       const fileId = await pgStore.updateFile(repositoryId, commitId, relPath, newHash, ext);
@@ -77,7 +80,7 @@ async function runScan(projectRoot, config, mcpMode = false) {
           const dbSymbols = newEntities.symbols.map(s => ({
               name: s.name,
               qualified_name: s.id || s.name,
-              kind: s.type, // DB uses 'kind' based on postgres-store.js
+              kind: s.type, 
               symbol_hash: computeHash(JSON.stringify(s)),
               start_line: s.startPosition ? s.startPosition.row : 0,
               end_line: s.endPosition ? s.endPosition.row : 0,
@@ -100,7 +103,7 @@ async function runScan(projectRoot, config, mcpMode = false) {
   const filesData = store.getFilesData();
   const edges = buildEdges(filesData);
 
-  // New Postgres logic: persist edges
+  // New logic: persist edges
   try {
     const activeSymbols = await db.selectFrom('symbols')
       .selectAll()
@@ -128,10 +131,10 @@ async function runScan(projectRoot, config, mcpMode = false) {
     }).filter(Boolean);
 
     if (dbEdges.length > 0) {
-      await db.insertInto('edges').values(dbEdges).execute();
+      await pgStore.updateEdges(repositoryId, commitId, dbEdges);
     }
   } catch (e) {
-    if (!mcpMode) console.warn('[DB EDGES] Could not persist edges to Postgres:', e.message);
+    if (!mcpMode) console.warn('[DB EDGES] Could not persist edges:', e.message);
     else process.stderr.write(`[CodeGraphX] DB Edge error: ${e.message}\n`);
   }
 

@@ -6,7 +6,7 @@ const {
   ListResourcesRequestSchema,
   ReadResourceRequestSchema
 } = require("@modelcontextprotocol/sdk/types.js");
-const { PostgresGraphStore } = require("../store/postgres-store");
+const { SqlGraphStore } = require("../store/sql-store");
 const { db } = require("../db");
 const { loadConfig, ensureDirSync } = require("../utils");
 const fs = require("fs");
@@ -25,7 +25,7 @@ class CodeGraphXServer {
 
     this.projectRoot = process.cwd();
     this.config = loadConfig(this.projectRoot);
-    this.pgStore = new PostgresGraphStore(db);
+    this.pgStore = new SqlGraphStore(db);
     this.repositoryId = null;
     this.graphReady = false;
     this.bloom = null;
@@ -44,7 +44,7 @@ class CodeGraphXServer {
   }
 
   async initialize() {
-    log("Initializing MCP Server with Postgres...");
+    log("Initializing MCP Server...");
     
     try {
       const repo = await db.selectFrom('repositories').selectAll().limit(1).executeTakeFirst();
@@ -259,7 +259,7 @@ class CodeGraphXServer {
   async run() {
     const transport = new StdioServerTransport();
     await this.server.connect(transport);
-    log("MCP Server running on stdio (Postgres mode)");
+    log("MCP Server running on stdio");
   }
 }
 

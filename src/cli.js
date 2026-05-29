@@ -178,8 +178,8 @@ program
   .option('--depth <depth>', 'Maximum recursion depth', '5')
   .action(async (sym, options) => {
     const { db } = require('./db');
-    const { PostgresGraphStore } = require('./store/postgres-store');
-    const pgStore = new PostgresGraphStore(db);
+    const { SqlGraphStore } = require('./store/sql-store');
+    const sqlStore = new SqlGraphStore(db);
 
     const matches = await db.selectFrom('symbols')
       .selectAll()
@@ -200,7 +200,7 @@ program
 
     for (const match of matches) {
       console.log(`\nImpact analysis for ${match.qualified_name} (${options.direction}):`);
-      const impact = await pgStore.traceImpact(repo.id, match.id, options.direction, parseInt(options.depth, 10));
+      const impact = await sqlStore.traceImpact(repo.id, match.id, options.direction, parseInt(options.depth, 10));
       if (!impact.length) {
         console.log('  No impact detected.');
       } else {
@@ -248,12 +248,12 @@ program
   .option('-b, --branch <branch>', 'Branch to compare against', 'HEAD')
   .action(async (options) => {
     const { loadConfig } = require('./utils');
-    const { PostgresGraphStore } = require('./store/postgres-store');
+    const { SqlGraphStore } = require('./store/sql-store');
     const { scanCommit } = require('./git/commit-scanner');
     const { db } = require('./db');
     
     const projectRoot = process.cwd();
-    const pgStore = new PostgresGraphStore(db);
+    const sqlStore = new SqlGraphStore(db);
     const repo = await db.selectFrom('repositories').selectAll().limit(1).executeTakeFirst();
     
     if (!repo) {
@@ -261,7 +261,7 @@ program
       process.exit(1);
     }
 
-    const summary = await scanCommit(projectRoot, pgStore, repo.id, options.branch);
+    const summary = await scanCommit(projectRoot, sqlStore, repo.id, options.branch);
     if (!summary) {
       console.log('No changes detected or not a git repository.');
       return;
@@ -278,10 +278,10 @@ program
   .requiredOption('--commit <hash>', 'The commit hash containing the changes')
   .action(async (options) => {
     const { getVerificationEvidence } = require('./verifier');
-    const { PostgresGraphStore } = require('./store/postgres-store');
+    const { SqlGraphStore } = require('./store/sql-store');
     const { db } = require('./db');
     
-    const pgStore = new PostgresGraphStore(db);
+    const sqlStore = new SqlGraphStore(db);
     
     const repo = await db.selectFrom('repositories').selectAll().limit(1).executeTakeFirst();
     if (!repo) {
@@ -295,7 +295,7 @@ program
        process.exit(1);
     }
 
-    const result = await getVerificationEvidence(pgStore, repo.id, commitRow.id, options.task);
+    const result = await getVerificationEvidence(sqlStore, repo.id, commitRow.id, options.task);
     console.log(JSON.stringify(result, null, 2));
     process.exit(0);
   });
