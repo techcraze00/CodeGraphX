@@ -16,6 +16,7 @@
     "cgx-mcp": "bin/cgx-mcp"
   },
   "dependencies": {
+    "@google/generative-ai": "^0.24.1",
     "@modelcontextprotocol/sdk": "^1.29.0",
     "@toon-format/toon": "^2.1.0",
     "bloom-filters": "^3.0.4",
@@ -33,7 +34,10 @@
     "ws": "^8.20.0"
   },
   "devDependencies": {
+    "@babel/core": "^7.29.7",
+    "@babel/preset-env": "^7.29.7",
     "@types/pg": "^8.20.0",
+    "babel-jest": "^30.4.1",
     "jest": "^30.4.2"
   }
 }
