@@ -5,7 +5,7 @@ const { program } = require('commander');
 program
   .name('codegraphx')
   .description('CodeGraphX - Codebase graphing and analysis tool')
-  .version('1.0.0');
+  .version(require('../package.json').version);
 
 async function runScan() {
   const path = require('path');
