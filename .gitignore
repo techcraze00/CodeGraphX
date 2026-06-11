@@ -5,3 +5,9 @@ node_modules
 test/
 .worktrees/
 dummy-test-repo/
+
+# Generated database artifacts
+.codegraphx.db
+.codegraphx.db-journal
+.codegraphx.db-wal
+.codegraphx.db-shm
