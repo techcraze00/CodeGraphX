@@ -187,6 +187,61 @@ describe('CodeGraphXServer', () => {
     expect(files[0].file).toBe('src/main.js');
   });
 
+  test('explain_impact returns impact summary', async () => {
+    server.graphReady = true;
+    server.repositoryId = 'test-repo';
+
+    // Insert a symbol
+    await db.insertInto('symbols').values({
+      id: 's1',
+      repository_id: 'test-repo',
+      file_id: 'f1',
+      name: 'mySymbol',
+      qualified_name: 'mySymbol',
+      kind: 'function',
+      symbol_hash: 'hash1',
+      valid_from_commit_id: 'c1'
+    }).execute();
+
+    const CallToolRequestSchema = require('@modelcontextprotocol/sdk/types.js').CallToolRequestSchema;
+    const handler = mockSetRequestHandler.mock.calls.find(call => call[0] === CallToolRequestSchema)[1];
+    
+    const result = await handler({
+      params: {
+        name: 'explain_impact',
+        arguments: { symbol_name: 'mySymbol' }
+      }
+    });
+
+    const impact = JSON.parse(result.content[0].text);
+    expect(impact.symbol).toBe('mySymbol');
+    expect(Array.isArray(impact.used_by_upstream)).toBe(true);
+    expect(Array.isArray(impact.breaks_downstream)).toBe(true);
+  });
+
+  test('verify_task calls buildTaskVerification', async () => {
+    server.graphReady = true;
+    server.repositoryId = 'test-repo';
+
+    const { buildTaskVerification } = require('../../src/verifier');
+    jest.mock('../../src/verifier', () => ({
+      buildTaskVerification: jest.fn().mockResolvedValue({ status: 'complete', changes: [] })
+    }), { virtual: true });
+
+    const CallToolRequestSchema = require('@modelcontextprotocol/sdk/types.js').CallToolRequestSchema;
+    const handler = mockSetRequestHandler.mock.calls.find(call => call[0] === CallToolRequestSchema)[1];
+    
+    const result = await handler({
+      params: {
+        name: 'verify_task',
+        arguments: { task_description: 'test task' }
+      }
+    });
+
+    const verification = JSON.parse(result.content[0].text);
+    expect(verification.status).toBe('complete');
+  });
+
   test('check_symbol_exists returns error when bloom is null', async () => {
     await server.initialize();
     server.bloom = null; 

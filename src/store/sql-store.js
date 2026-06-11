@@ -50,9 +50,11 @@ class SqlGraphStore {
 
   async getChangesInCommit(repositoryId, commitId) {
     const added = await this.db.selectFrom('symbols')
-      .selectAll()
-      .where('repository_id', '=', repositoryId)
-      .where('valid_from_commit_id', '=', commitId)
+      .innerJoin('files', 'symbols.file_id', 'files.id')
+      .selectAll('symbols')
+      .select('files.path as path')
+      .where('symbols.repository_id', '=', repositoryId)
+      .where('symbols.valid_from_commit_id', '=', commitId)
       .where((eb) => eb.not(
         eb.exists(
           eb.selectFrom('symbols as s2')
@@ -65,9 +67,11 @@ class SqlGraphStore {
       .execute();
 
     const modified = await this.db.selectFrom('symbols')
-      .selectAll()
-      .where('repository_id', '=', repositoryId)
-      .where('valid_from_commit_id', '=', commitId)
+      .innerJoin('files', 'symbols.file_id', 'files.id')
+      .selectAll('symbols')
+      .select('files.path as path')
+      .where('symbols.repository_id', '=', repositoryId)
+      .where('symbols.valid_from_commit_id', '=', commitId)
       .where((eb) => eb.exists(
         eb.selectFrom('symbols as s2')
           .select('s2.id')
@@ -78,9 +82,11 @@ class SqlGraphStore {
       .execute();
 
     const removed = await this.db.selectFrom('symbols')
-      .selectAll()
-      .where('repository_id', '=', repositoryId)
-      .where('valid_to_commit_id', '=', commitId)
+      .innerJoin('files', 'symbols.file_id', 'files.id')
+      .selectAll('symbols')
+      .select('files.path as path')
+      .where('symbols.repository_id', '=', repositoryId)
+      .where('symbols.valid_to_commit_id', '=', commitId)
       .where((eb) => eb.not(
         eb.exists(
           eb.selectFrom('symbols as s2')

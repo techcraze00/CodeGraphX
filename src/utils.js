@@ -162,4 +162,12 @@ function loadConfig(projectRoot = process.cwd()) {
   return config;
 }
 
-module.exports = { ensureDirSync, writeJSONSync, findFiles, loadConfig };
+function normalizeNodePath(absolutePath, workspaceRoot) {
+  if (!absolutePath || !workspaceRoot) return absolutePath;
+  if (absolutePath.startsWith(workspaceRoot)) {
+    return path.relative(workspaceRoot, absolutePath);
+  }
+  return absolutePath;
+}
+
+module.exports = { ensureDirSync, writeJSONSync, findFiles, loadConfig, normalizeNodePath };

@@ -21,4 +21,30 @@ describe('Task Verifier Evidence Generator', () => {
     expect(result.graphEvidence).toEqual(mockContext);
     expect(result.heuristicQuestions).toEqual(mockQuestions);
   });
+
+  test('buildTaskVerification returns status and changes', async () => {
+    const { buildTaskVerification } = require('../src/verifier');
+    const mockPgStore = {
+      db: {
+        selectFrom: jest.fn().mockReturnThis(),
+        select: jest.fn().mockReturnThis(),
+        where: jest.fn().mockReturnThis(),
+        orderBy: jest.fn().mockReturnThis(),
+        limit: jest.fn().mockReturnThis(),
+        executeTakeFirst: jest.fn().mockResolvedValue({ id: 'c1' })
+      },
+      getChangesInCommit: jest.fn().mockResolvedValue({
+        added: [{ path: 'src/main.js', name: 'start' }],
+        modified: [],
+        removed: []
+      })
+    };
+
+    const result = await buildTaskVerification('test task', 'HEAD', mockPgStore, 'repo-id');
+    
+    expect(result.status).toBe('complete');
+    expect(result.changes).toHaveLength(1);
+    expect(result.changes[0].file).toBe('src/main.js');
+    expect(result.untested_additions).toBe(true); // No test files in mock
+  });
 });

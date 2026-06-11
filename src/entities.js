@@ -186,13 +186,16 @@ function collectSyntaxErrors(rootNode, contents) {
   return errors;
 }
 
-function extractEntities(file, contents) {
+function extractEntities(file, contents, projectRoot = null) {
+  const { normalizeNodePath } = require('./utils');
+  const normalizedFile = projectRoot ? normalizeNodePath(file, projectRoot) : file;
+
   try {
     const { tree, type, error } = parseFile(file, contents);
 
     if (!tree || error) {
       return new FileEntity({ 
-        path: file, 
+        path: normalizedFile, 
         symbols: [], 
         imports: [], 
         parseError: error || 'Unknown parse error' 
@@ -205,11 +208,12 @@ function extractEntities(file, contents) {
 
     const symbols = (rawSymbols || []).map(sym => {
       const scope = sym.scope || 'global';
-      const id = `${type}::${file}::${scope}::${sym.name}`;
+      // Use normalizedFile (relative) in the ID
+      const id = `${type}::${normalizedFile}::${scope}::${sym.name}`;
       return new SymbolEntity({
         ...sym,
         id,
-        file,
+        file: normalizedFile,
         scope
       });
     });
@@ -221,7 +225,7 @@ function extractEntities(file, contents) {
     }
 
     return new FileEntity({
-      path: file,
+      path: normalizedFile,
       language: type,
       symbols,
       imports,
@@ -230,7 +234,7 @@ function extractEntities(file, contents) {
   } catch (e) {
     console.warn(`[CodeGraphX] Failed to extract entities from ${file}: ${e.message}`);
     return new FileEntity({
-      path: file,
+      path: normalizedFile,
       symbols: [],
       imports: [],
       syntaxErrors: [],

@@ -105,14 +105,14 @@ class CodeGraphXServer {
           },
         },
         {
-          name: "query_symbol",
-          description: "Get detailed information about a specific symbol.",
+          name: "explain_impact",
+          description: "Provides a high-level summary of a symbol's blast radius (upstream/downstream).",
           inputSchema: {
             type: "object",
             properties: {
-              name: { type: "string", description: "Symbol name." },
+              symbol_name: { type: "string", description: "The symbol name to explain impact for." },
             },
-            required: ["name"],
+            required: ["symbol_name"],
           },
         },
         {
@@ -127,16 +127,15 @@ class CodeGraphXServer {
           },
         },
         {
-          name: "trace_impact",
-          description: "Trace the upstream or downstream impact of a symbol.",
+          name: "verify_task",
+          description: "High-level tool to verify if a specific task description has been implemented in a commit.",
           inputSchema: {
             type: "object",
             properties: {
-              symbol: { type: "string", description: "Symbol ID or name." },
-              direction: { type: "string", enum: ["upstream", "downstream"] },
-              depth: { type: "integer" },
+              task_description: { type: "string", description: "Description of the task to verify." },
+              commit_hash: { type: "string", description: "The commit hash to verify against (optional, defaults to HEAD)." },
             },
-            required: ["symbol", "direction"],
+            required: ["task_description"],
           },
         },
         {
@@ -186,16 +185,30 @@ class CodeGraphXServer {
         return { content: [{ type: "text", text: JSON.stringify(files, null, 2) }] };
       }
 
-      if (name === "query_symbol") {
-        const matches = await db.selectFrom('symbols as s')
-          .innerJoin('files as f', 's.file_id', 'f.id')
-          .selectAll('s')
-          .select('f.path as file_path')
-          .where('s.name', '=', args.name)
-          .where('s.valid_to_commit_id', 'is', null)
-          .execute();
+      if (name === "explain_impact") {
+        const sym = await db.selectFrom('symbols')
+          .select('id')
+          .where('name', '=', args.symbol_name)
+          .where('valid_to_commit_id', 'is', null)
+          .executeTakeFirst();
+        
+        if (!sym) {
+          return { content: [{ type: "text", text: `Symbol not found: ${args.symbol_name}` }], isError: true };
+        }
 
-        return { content: [{ type: "text", text: JSON.stringify(matches, null, 2) }] };
+        const upstream = await this.pgStore.traceImpact(this.repositoryId, sym.id, 'upstream', 3);
+        const downstream = await this.pgStore.traceImpact(this.repositoryId, sym.id, 'downstream', 3);
+
+        return {
+          content: [{
+            type: "text",
+            text: JSON.stringify({
+              symbol: args.symbol_name,
+              used_by_upstream: upstream.map(s => `${s.path}::${s.name}`),
+              breaks_downstream: downstream.map(s => `${s.path}::${s.name}`)
+            }, null, 2)
+          }]
+        };
       }
 
       if (name === "check_symbol_exists") {
@@ -211,20 +224,15 @@ class CodeGraphXServer {
         };
       }
 
-      if (name === "trace_impact") {
-        // Resolve symbol ID first if name given
-        let symbolId = args.symbol;
-        if (!symbolId.includes('-')) { // Heuristic: if no hyphen, it might be a name
-          const sym = await db.selectFrom('symbols')
-            .select('id')
-            .where('name', '=', args.symbol)
-            .where('valid_to_commit_id', 'is', null)
-            .executeTakeFirst();
-          if (sym) symbolId = sym.id;
-        }
-
-        const impact = await this.pgStore.traceImpact(this.repositoryId, symbolId, args.direction, args.depth || 3);
-        return { content: [{ type: "text", text: JSON.stringify(impact, null, 2) }] };
+      if (name === "verify_task") {
+        const { buildTaskVerification } = require("../verifier");
+        const verification = await buildTaskVerification(
+          args.task_description, 
+          args.commit_hash || "HEAD",
+          this.pgStore,
+          this.repositoryId
+        );
+        return { content: [{ type: "text", text: JSON.stringify(verification, null, 2) }] };
       }
 
       if (name === "get_session_diff") {

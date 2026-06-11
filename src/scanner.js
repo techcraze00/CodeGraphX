@@ -74,7 +74,7 @@ async function runScan(projectRoot, config, mcpMode = false) {
       const ext = path.extname(filepath).substring(1) || 'text';
       const fileId = await pgStore.updateFile(repositoryId, commitId, relPath, newHash, ext);
       
-      const newEntities = await extractEntities(filepath, contents);
+      const newEntities = await extractEntities(filepath, contents, projectRoot);
       if (newEntities.symbols && newEntities.symbols.length > 0) {
           // Format symbols for DB
           const dbSymbols = newEntities.symbols.map(s => ({

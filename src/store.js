@@ -66,7 +66,7 @@ class GraphStore {
       return { changed: false, entities: oldEntry.entities, delta: null };
     }
 
-    const newEntities = await extractEntities(filepath, contents);
+    const newEntities = await extractEntities(filepath, contents, this.projectRoot);
     newEntities.hash = newHash;
     
     // Clear old symbols from index if they existed
