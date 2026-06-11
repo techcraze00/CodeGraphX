@@ -23,6 +23,13 @@ async function runScan(projectRoot, config, mcpMode = false) {
   const outputFile = path.join(outputDir, config.outputFile);
 
   ensureDirSync(outputDir);
+
+  // Ensure the schema exists on fresh databases (idempotent when current)
+  const { runMigrations } = require('./db/migrator');
+  const { error: migrationError } = await runMigrations();
+  if (migrationError) {
+    throw new Error(`Database migration failed: ${migrationError.message || migrationError}`);
+  }
   
   // Find files with configured extensions, respecting ignore list
   const ignoreList = config.ignore || [];
