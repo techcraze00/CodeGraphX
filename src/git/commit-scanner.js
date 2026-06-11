@@ -1,6 +1,7 @@
 const { execFileSync } = require('child_process');
 const fs = require('fs');
 const path = require('path');
+const { CommitEntity } = require('../entities');
 
 function runGit(args) {
   try {
@@ -53,29 +54,27 @@ function parseDiff(diffStr) {
   return changes;
 }
 
-function mapDiffToNodes(changes, filesData) {
+async function mapDiffToNodes(changes, pgStore, repositoryId, commitId) {
   const added = [];
   const removed = [];
   const modified = [];
   
   for (const [file, diff] of Object.entries(changes)) {
-    const fileData = filesData.find(f => f.file === file);
-    if (!fileData || !fileData.symbols) continue;
+    const symbols = await pgStore.getSymbolsInFile(repositoryId, commitId, file);
+    if (!symbols) continue;
 
-    for (const sym of fileData.symbols) {
-      if (!sym.startPosition) continue;
-      // startPosition.row is 0-based, diff lines are 1-based
-      const symRow = sym.startPosition.row + 1;
+    for (const sym of symbols) {
+      const symRow = (sym.start_line || 0) + 1;
       
       const hasAdded = diff.added.some(l => Math.abs(l - symRow) <= 5);
       const hasRemoved = diff.removed.some(l => Math.abs(l - symRow) <= 5);
       
       if (hasAdded && !hasRemoved) {
-        added.push(`${file}::${sym.name}`);
+        added.push(sym.qualified_name);
       } else if (hasRemoved && !hasAdded) {
-        removed.push(`${file}::${sym.name}`);
+        removed.push(sym.qualified_name);
       } else if (hasAdded && hasRemoved) {
-        modified.push(`${file}::${sym.name}`);
+        modified.push(sym.qualified_name);
       }
     }
   }
@@ -101,26 +100,37 @@ function generateSummary(diffStr) {
   return summaries.join('; ') || 'Modified code logic';
 }
 
-function scanCommit(projectRoot, store, branch = 'HEAD') {
+async function scanCommit(projectRoot, pgStore, repositoryId, branch = 'HEAD') {
   const currentBranch = runGit(['rev-parse', '--abbrev-ref', 'HEAD']);
   const commitHash = runGit(['log', '-1', '--pretty=%H', branch]);
+  
+  const commit = await pgStore.db.selectFrom('commits')
+    .selectAll()
+    .where('hash', '=', commitHash)
+    .executeTakeFirst();
+    
+  if (!commit) return null;
+
+  const author = runGit(['log', '-1', '--pretty=%an', branch]);
+  const timestamp = runGit(['log', '-1', '--pretty=%at', branch]);
+  const message = runGit(['log', '-1', '--pretty=%s', branch]);
   const diffStr = runGit(['diff', `${branch}~1`, branch, '--unified=0']);
   
   if (!diffStr) return null;
 
   const changes = parseDiff(diffStr);
-  const { added, removed, modified } = mapDiffToNodes(changes, store.getFilesData());
+  const symbolChanges = await mapDiffToNodes(changes, pgStore, repositoryId, commit.id);
   const ruleSummary = generateSummary(diffStr);
 
-  return {
-    date: new Date().toISOString(),
-    commit: commitHash,
+  return new CommitEntity({
+    hash: commitHash,
+    author,
+    timestamp: parseInt(timestamp, 10) * 1000,
+    message,
     branch: currentBranch,
-    added,
-    removed,
-    modified,
-    rule_summary: ruleSummary
-  };
+    changes: symbolChanges,
+    summary: ruleSummary
+  });
 }
 
 module.exports = { scanCommit, parseDiff, mapDiffToNodes, generateSummary };
