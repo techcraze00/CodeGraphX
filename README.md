@@ -52,10 +52,11 @@ codegraphx dashboard
 ```
 
 ### Key Commands
-- `codegraphx init`: Parses the codebase and generates the initial graph.
+- `codegraphx init` / `codegraphx scan`: Parses the codebase and generates the graph (`.codegraphx.db` + `.codegraphx/` artifacts).
 - `codegraphx watch`: Starts the file watcher for real-time live graph updates.
 - `codegraphx query <symbol>`: Show details (files, edges, calls, called_by) for a specific symbol.
 - `codegraphx impact <symbol>`: Trace all symbols directly or indirectly impacted by a given symbol.
+- `codegraphx doctor`: Diagnose the codebase — parse errors, unresolved imports/calls, circular dependencies.
 - `codegraphx dashboard`: Opens a live interactive HTML graph visualization in your default browser.
 - `codegraphx stats`: Prints graph statistics (files, symbols, edges).
 
@@ -63,35 +64,76 @@ codegraphx dashboard
 
 CodeGraphX includes an **MCP (Model Context Protocol) Server**. This is where it truly shines. Instead of the AI agent blindly reading raw source files, it can use the `cgx-mcp` server to intelligently query your codebase structure, saving thousands of tokens and eliminating "cold start" scanning time.
 
-The MCP server provides tools to the AI like `get_graph_status`, `list_files`, `query_symbol`, `check_symbol_exists`, and `trace_impact`.
+**Zero-setup:** you do not need to run a scan first. On its first start in a project, the server automatically indexes the codebase in the background. While indexing, `get_graph_status` reports `"indexing"`; once it reports `"ready"`, every tool is live.
 
-### Claude Desktop Configuration
+### MCP Tools
 
-To use CodeGraphX with Claude Desktop, add the following to your `claude_desktop_config.json` (usually located at `~/Library/Application Support/Claude/claude_desktop_config.json` on macOS):
+| Tool | What it does |
+|---|---|
+| `get_graph_status` | Health/readiness check: `indexing`, `ready`, or `error`, plus file count. |
+| `list_files` | List indexed files, with an optional substring `filter`. |
+| `check_symbol_exists` | Instant O(1) Bloom-filter lookup — returns `probable_yes` or `definite_no`. |
+| `explain_impact` | Blast radius of a symbol: who uses it upstream, what it breaks downstream. |
+| `verify_task` | Compare a task description against a commit's actual changes — returns status, changed symbols, and untested additions. |
+| `get_session_diff` | Structural summary of changes vs HEAD or a branch. |
+
+### Picking the project root
+
+The server indexes the directory it is started in. If your MCP client doesn't set a working directory, pass it explicitly — either way works:
+
+```bash
+cgx-mcp --project-root /path/to/your/project
+# or
+CGX_PROJECT_ROOT=/path/to/your/project cgx-mcp
+```
+
+### Claude Code Configuration
+
+From inside your project directory:
+
+```bash
+claude mcp add codegraphx -- npx -y -p codegraphx cgx-mcp
+```
+
+Or in your project's `.mcp.json`:
 
 ```json
 {
   "mcpServers": {
     "codegraphx": {
       "command": "npx",
-      "args": ["-y", "codegraphx", "cgx-mcp"]
+      "args": ["-y", "-p", "codegraphx", "cgx-mcp"]
     }
   }
 }
 ```
 
-*Note: The command assumes you are running Claude Desktop within the context of a project directory where `codegraphx` should analyze the code.*
+### Claude Desktop Configuration
 
-### Gemini CLI Configuration
-
-To use CodeGraphX with Gemini CLI, you can set up a custom MCP server in your workspace's `.gemini/mcp.json` configuration:
+Add to `claude_desktop_config.json` (on macOS: `~/Library/Application Support/Claude/claude_desktop_config.json`). Claude Desktop has no project directory, so set the root explicitly:
 
 ```json
 {
   "mcpServers": {
     "codegraphx": {
       "command": "npx",
-      "args": ["codegraphx", "cgx-mcp"]
+      "args": ["-y", "-p", "codegraphx", "cgx-mcp", "--project-root", "/path/to/your/project"]
+    }
+  }
+}
+```
+
+### Gemini CLI Configuration
+
+In your project's `.gemini/settings.json` (use an absolute path to `node` — Gemini doesn't inherit your shell PATH; see `mcp-setup.md` for troubleshooting):
+
+```json
+{
+  "mcpServers": {
+    "codegraphx": {
+      "command": "/ABSOLUTE/PATH/TO/node",
+      "args": ["/ABSOLUTE/PATH/TO/node_modules/codegraphx/bin/cgx-mcp"],
+      "cwd": "/ABSOLUTE/PATH/TO/YOUR_PROJECT"
     }
   }
 }

@@ -42,28 +42,32 @@ FIX: Trust the folder once:
   gemini trust
 
 ─────────────────────────────────────────────────────────────────
-CAUSE 4 ▸ Graph not initialised → 0 tools → connection dropped
+CAUSE 4 ▸ Wrong project root → server indexes the wrong directory
 ─────────────────────────────────────────────────────────────────
-The MCP server reads from the .codegraphx/ cache. If no scan has been run,
-it registers 0 tools and Gemini silently drops the connection.
+The server indexes the directory it starts in. If your MCP client does
+not set a working directory, the server may look at the wrong folder.
 
-FIX: Always run scan before starting Gemini:
-  codegraphx scan        # or: npx codegraphx scan
+FIX: Pass the project root explicitly — either works:
+  cgx-mcp --project-root /path/to/your/project
+  CGX_PROJECT_ROOT=/path/to/your/project cgx-mcp
 
-The patched server now returns a helpful error message from every tool
-instead of crashing, so the connection stays alive even without a scan.
+Tools are ALWAYS registered, even before any scan exists. On first start
+in a project the server automatically indexes the codebase in the
+background; get_graph_status reports "indexing" until it is "ready".
 
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-STEP 1 — Scan first
+STEP 1 — (Optional) Scan
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+No manual scan is required: the MCP server auto-indexes on first start.
+
+Running a scan yourself is still useful if you want the extra artifacts
+(HTML dashboard, TOON files) or want indexing done before the agent
+connects:
 
   cd /your/project
   npx codegraphx scan      # or `codegraphx scan` if installed globally
-
-This creates .codegraphx/codebase.json and .codegraphx/cache.json.
-The MCP server is a read-only consumer of this cache — it never scans
-itself. Re-run scan whenever your code changes significantly.
 
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -96,13 +100,15 @@ File: YOUR_PROJECT/.gemini/settings.json
     "codegraphx": {
       "command": "/ABSOLUTE/PATH/TO/node",
       "args": [
-        "/ABSOLUTE/PATH/TO/node_modules/.bin/codegraphx",
-        "cgx-mcp"
+        "/ABSOLUTE/PATH/TO/node_modules/codegraphx/bin/cgx-mcp"
       ],
       "cwd": "/ABSOLUTE/PATH/TO/YOUR_PROJECT"
     }
   }
 }
+
+If your client ignores "cwd", add "--project-root /ABSOLUTE/PATH/TO/YOUR_PROJECT"
+to args instead — it takes precedence over the working directory.
 
 Real example (macOS, nvm, globally installed codegraphx):
 {
@@ -110,8 +116,7 @@ Real example (macOS, nvm, globally installed codegraphx):
     "codegraphx": {
       "command": "/Users/alice/.nvm/versions/node/v20.11.0/bin/node",
       "args": [
-        "/Users/alice/.nvm/versions/node/v20.11.0/bin/codegraphx",
-        "cgx-mcp"
+        "/Users/alice/.nvm/versions/node/v20.11.0/bin/cgx-mcp"
       ],
       "cwd": "/Users/alice/projects/my-app"
     }
@@ -141,8 +146,7 @@ File: YOUR_PROJECT/.gemini/settings.json
     "codegraphx": {
       "command": "/ABSOLUTE/PATH/TO/node",
       "args": [
-        "./node_modules/.bin/codegraphx",
-        "cgx-mcp"
+        "./node_modules/codegraphx/bin/cgx-mcp"
       ],
       "cwd": "/ABSOLUTE/PATH/TO/YOUR_PROJECT"
     }
@@ -204,9 +208,8 @@ Any error printed there is the real cause.
 QUICK CHECKLIST
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-  □ codegraphx scan ran successfully (.codegraphx/ folder exists)
   □ settings.json uses ABSOLUTE path to node (not "npx", not "node")
-  □ cwd in settings.json matches the project root exactly
+  □ cwd (or --project-root) in settings.json matches the project root exactly
   □ Server name has NO underscores (use "codegraphx" not "code_graphx")
   □ gemini trust run in the project folder (project-scope only)
   □ Gemini CLI restarted after editing settings.json
