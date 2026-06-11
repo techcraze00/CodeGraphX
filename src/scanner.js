@@ -38,7 +38,7 @@ async function runScan(projectRoot, config, mcpMode = false) {
   // Ensure a repository exists in the database
   let repo = await db.selectFrom('repositories').selectAll().limit(1).executeTakeFirst();
   if (!repo) {
-    console.log('No repository found in database. Creating default entry...');
+    if (!mcpMode) console.log('No repository found in database. Creating default entry...');
     repo = await db.insertInto('repositories')
       .values({
         id: require('crypto').randomUUID(),

@@ -4,13 +4,13 @@ describe('EdgeBuilder', () => {
   const mockFiles = [
     {
       file: 'a.js',
-      declaredSymbols: [
+      symbols: [
         { id: 'js::a.js::global::f1', name: 'f1', type: 'function', calls: ['f2'] }
       ]
     },
     {
       file: 'b.js',
-      declaredSymbols: [
+      symbols: [
         { id: 'js::b.js::global::f2', name: 'f2', type: 'function', calls: [] }
       ]
     }
@@ -69,14 +69,14 @@ describe('EdgeBuilder', () => {
         path: 'src/utils.js',
         exports: [{ name: 'helper', symbolId: 'src/utils.js::helper' }],
         imports: [],
-        declaredSymbols: [{ id: 'src/utils.js::helper', name: 'helper', type: 'function' }],
+        symbols: [{ id: 'src/utils.js::helper', name: 'helper', type: 'function' }],
         calls: []
       },
       {
         path: 'src/main.js',
         exports: [],
         imports: [{ localName: 'utilHelper', importedName: 'helper', source: './utils' }],
-        declaredSymbols: [{ id: 'src/main.js::mainFunc', name: 'mainFunc', type: 'function', calls: ['utilHelper'] }],
+        symbols: [{ id: 'src/main.js::mainFunc', name: 'mainFunc', type: 'function', calls: ['utilHelper'] }],
         calls: ['utilHelper']
       }
     ];

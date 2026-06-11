@@ -19,7 +19,7 @@ const warn = (...a) => process.stderr.write('[CodeGraphX] WARN ' + a.join(' ') +
 class CodeGraphXServer {
   constructor() {
     this.server = new Server(
-      { name: "codegraphx", version: "1.0.0" },
+      { name: "codegraphx", version: require("../../package.json").version },
       { capabilities: { tools: {}, resources: {} } }
     );
 
@@ -29,6 +29,9 @@ class CodeGraphXServer {
     this.repositoryId = null;
     this.graphReady = false;
     this.bloom = null;
+    this.indexing = false;
+    this.indexError = null;
+    this._scanPromise = null;
 
     this.setupTools();
     this.setupResources();
@@ -45,21 +48,42 @@ class CodeGraphXServer {
 
   async initialize() {
     log("Initializing MCP Server...");
-    
+
+    let needsScan = false;
     try {
       const repo = await db.selectFrom('repositories').selectAll().limit(1).executeTakeFirst();
       if (repo) {
-        this.repositoryId = repo.id;
-        this.graphReady = true;
-        log(`Connected to repository: ${repo.name} (${repo.id})`);
+        const fileCountRes = await db.selectFrom('files')
+          .select(db.fn.count('id').as('count'))
+          .where('valid_to_commit_id', 'is', null)
+          .executeTakeFirst();
+        if (Number(fileCountRes?.count || 0) > 0) {
+          this.repositoryId = repo.id;
+          this.graphReady = true;
+          log(`Connected to repository: ${repo.name} (${repo.id})`);
+        } else {
+          needsScan = true;
+        }
       } else {
-        warn("No repository found in database. Run 'codegraphx scan' first.");
+        needsScan = true;
       }
     } catch (e) {
-      warn("Database connection failed during initialization:", e.message);
+      // Fresh project: tables don't exist until migrations run.
+      needsScan = true;
+      log("Database not initialized yet:", e.message);
     }
 
-    // Load Bloom Filter
+    if (needsScan) {
+      log("No indexed graph found. Starting background scan...");
+      // Intentionally not awaited: initialize() must return fast so the
+      // stdio handshake doesn't time out while a large repo is indexed.
+      this._startBackgroundScan();
+    }
+
+    this._loadBloom();
+  }
+
+  _loadBloom() {
     const bloomPath = path.join(this.projectRoot, this.config.outputDir, "symbols.bloom");
     if (fs.existsSync(bloomPath)) {
       try {
@@ -72,15 +96,60 @@ class CodeGraphXServer {
     }
   }
 
+  _startBackgroundScan() {
+    if (this._scanPromise) return this._scanPromise;
+
+    this.indexing = true;
+    this.indexError = null;
+
+    this._scanPromise = (async () => {
+      const { runMigrations } = require("../db/migrator");
+      const { runScan } = require("../scanner");
+
+      await runMigrations();
+      await runScan(this.projectRoot, this.config, true);
+
+      const repo = await db.selectFrom('repositories').selectAll().limit(1).executeTakeFirst();
+      if (!repo) throw new Error("Scan completed but no repository was created.");
+
+      this.repositoryId = repo.id;
+      this.graphReady = true;
+      this._loadBloom();
+      log(`Background scan complete. Connected to repository: ${repo.name} (${repo.id})`);
+    })().catch((e) => {
+      this.indexError = e.message;
+      warn("Background scan failed:", e.message);
+    }).finally(() => {
+      this.indexing = false;
+    });
+
+    return this._scanPromise;
+  }
+
   _notReadyResponse(toolName) {
+    if (this.indexing) {
+      return {
+        content: [{
+          type: "text",
+          text: JSON.stringify({
+            status: "indexing",
+            message: "CodeGraphX is indexing this project for the first time. Retry this tool in a few seconds.",
+            tool: toolName
+          }, null, 2)
+        }],
+        isError: false,
+      };
+    }
     return {
-      content: [{ 
-        type: "text", 
+      content: [{
+        type: "text",
         text: JSON.stringify({
-          status: "not_ready",
-          message: "CodeGraphX graph not initialized. Run 'codegraphx scan' first.",
+          status: this.indexError ? "error" : "not_ready",
+          message: this.indexError
+            ? `Initial scan failed: ${this.indexError}. Run 'npx codegraphx scan' manually.`
+            : "CodeGraphX graph not initialized. Run 'codegraphx scan' first.",
           tool: toolName
-        }, null, 2) 
+        }, null, 2)
       }],
       isError: true,
     };
@@ -155,13 +224,21 @@ class CodeGraphXServer {
       const { name, arguments: args } = request.params;
 
       if (name === "get_graph_status") {
-        if (!this.graphReady) return { content: [{ type: "text", text: "Not initialized" }] };
+        if (!this.graphReady) {
+          const status = this.indexing
+            ? { initialized: false, status: "indexing", message: "Initial scan in progress. Retry in a few seconds." }
+            : this.indexError
+              ? { initialized: false, status: "error", error: this.indexError, hint: "Run 'npx codegraphx scan' manually." }
+              : { initialized: false, status: "not_ready", message: "No graph found. Run 'codegraphx scan' first." };
+          return { content: [{ type: "text", text: JSON.stringify(status, null, 2) }] };
+        }
         const fileCountRes = await db.selectFrom('files').select(db.fn.count('id').as('count')).where('valid_to_commit_id', 'is', null).executeTakeFirst();
         return {
           content: [{
             type: "text",
             text: JSON.stringify({
               initialized: true,
+              status: "ready",
               repositoryId: this.repositoryId,
               fileCount: fileCountRes?.count || 0
             }, null, 2),
@@ -172,7 +249,7 @@ class CodeGraphXServer {
       if (!this.graphReady) return this._notReadyResponse(name);
 
       if (name === "list_files") {
-        const query = db.selectFrom('files')
+        let query = db.selectFrom('files')
           .select(['path as file'])
           .where('repository_id', '=', this.repositoryId)
           .where('valid_to_commit_id', 'is', null);

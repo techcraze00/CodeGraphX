@@ -128,6 +128,7 @@ function loadConfig(projectRoot = process.cwd()) {
   config.ignore = config.ignore || [
   // Version control
   ".git",
+  ".worktrees",
   // Package managers
   "node_modules",
   // Python
@@ -158,7 +159,7 @@ function loadConfig(projectRoot = process.cwd()) {
 ];
   config.outputDir = config.outputDir || ".codegraphx";
   config.outputFile = config.outputFile || "codebase.json";
-  config.extensions = config.extensions || [".py"];
+  config.extensions = config.extensions || [".py", ".js", ".jsx", ".ts", ".tsx", ".html", ".css"];
   return config;
 }
 

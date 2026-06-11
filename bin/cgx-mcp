@@ -1,7 +1,42 @@
 #!/usr/bin/env node
 /**
  * CodeGraphX MCP Server Entry Point
+ *
+ * Resolves the project root BEFORE any src module is required, because the
+ * database path is derived from process.cwd() at require time.
+ * Precedence: --project-root <path> > CGX_PROJECT_ROOT env > current cwd.
  */
+const path = require('path');
+const fs = require('fs');
+
+let projectRoot = process.env.CGX_PROJECT_ROOT || process.cwd();
+const argIndex = process.argv.indexOf('--project-root');
+if (argIndex !== -1) {
+  if (!process.argv[argIndex + 1]) {
+    process.stderr.write('[CodeGraphX] --project-root requires a path argument\n');
+    process.exit(1);
+  }
+  projectRoot = process.argv[argIndex + 1];
+}
+
+projectRoot = path.resolve(projectRoot);
+if (!fs.existsSync(projectRoot)) {
+  process.stderr.write(`[CodeGraphX] Project root does not exist: ${projectRoot}\n`);
+  process.exit(1);
+}
+process.chdir(projectRoot);
+
+// stdio transport: stdout must carry only JSON-RPC. Route all console
+// output from any module to stderr.
+const toStderr = (...args) => process.stderr.write(args.map(String).join(' ') + '\n');
+console.log = toStderr;
+console.info = toStderr;
+console.warn = toStderr;
+
+process.on('uncaughtException', (error) => {
+  process.stderr.write(`[CodeGraphX] Uncaught exception: ${error.stack || error}\n`);
+});
+
 const { CodeGraphXServer } = require('../src/server/mcp-server.js');
 
 const server = new CodeGraphXServer();
