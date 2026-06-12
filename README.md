@@ -21,6 +21,7 @@
 |---------|---------|
 | 🧠 **Incremental Parsing** | Only re-parses changed files; O(1) cache hits for unchanged code |
 | 🔗 **Call Graph & Dependencies** | Track `calls`, `called_by`, and `imports` across your entire codebase |
+| 🌉 **Cross-Language Linking** | Connect frontend HTTP calls (`fetch`/`axios`) to backend routes (Express/Flask/FastAPI) — even across JS ↔ Python |
 | ⚡ **Bloom Filter Lookup** | O(1) symbol existence checks with configurable false-positive rate |
 | 🤖 **MCP Server Support** | Native integration with Gemini CLI, Claude Desktop, Cursor, and other MCP-compatible agents |
 | 🌐 **Interactive Dashboard** | Real-time D3.js visualization of your code graph in the browser |
@@ -340,6 +341,32 @@ codegraphx diff main feature-branch
 # - Rule-based summary (e.g., "Added function processOrder")
 # - Impact analysis ready for agent review
 ```
+
+### Cross-Language Intelligence
+
+CodeGraphX links the frontend to the backend automatically. During a scan it
+extracts the HTTP requests your client code makes and the routes your server
+exposes, then matches them into `API_CALLS` edges with a confidence score:
+
+```
+fetch('/api/users')        ──API_CALLS(0.9)──▶  app.get('/api/users', listUsers)   [Express]
+axios.post('/api/orders')  ──API_CALLS(0.9)──▶  @router.post('/api/orders')        [FastAPI]
+fetch(`/api/users/${id}`)  ──API_CALLS(0.7)──▶  @app.route('/api/users/<id>')      [Flask]
+```
+
+Supported on both sides of the stack:
+
+- **Frontend calls**: `fetch(...)` (with `method` option), `axios.get/post/...`, `axios({ url, method })`, and axios-like clients.
+- **Backend routes**: Express/`router` (`app.get`, `router.post`, …), Flask (`@app.route(..., methods=[...])`), and FastAPI (`@router.get`, `@app.post`, …).
+
+Confidence: `0.9` exact path + method, `0.75` exact path / different method,
+`0.7` parameterized path + method, `0.55` parameterized path / different method.
+Path parameters (`:id`, `{id}`, `<int:id>`) are normalized before matching, so a
+React component calling `/api/users/${id}` links to a FastAPI `/api/users/{user_id}`
+handler even though the two never reference each other directly. Route handlers
+are also tagged with an `endpoint` ontology marker, and `explain_impact` traverses
+`API_CALLS` edges — so an agent asking "what calls this backend handler?" sees the
+frontend functions across the language boundary.
 
 ---
 

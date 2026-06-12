@@ -63,6 +63,8 @@ The DB schema is intentionally append-only. Rows are **never deleted**. Instead,
 | `src/parser.js` | Delegates to language adapters; returns `declaredSymbols`, `imports`, `calls` |
 | `src/languages/index.js` | Routes `.py/.js/.ts/.tsx/.jsx/.html/.css` to the matching Tree-sitter adapter |
 | `src/edgebuilder.js` | Builds `EdgeEntity` records from parsed call/import references |
+| `src/cross-language-linker.js` | `linkApiContracts(files)` — matches frontend HTTP calls to backend routes, emitting confidence-scored `API_CALLS` edges (Phase 6) |
+| `src/languages/javascript/api-contracts.js` | `extractApiContracts(tree)` — pulls `fetch`/`axios` calls and Express routes from JS/TS trees; Python routes (Flask/FastAPI) come from the Python adapter's `extractApiContracts` |
 | `src/verifier.js` | `getVerificationEvidence` / `buildTaskVerification` — compares commit changes against a task description |
 | `src/sdk/index.js` | `IntelligenceSDK` — programmatic API for embedding CGX in other tools |
 | `src/sdk/drift-detector.js` | Detects architectural drift via downstream impact tracing + rule matching |

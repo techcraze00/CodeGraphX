@@ -40,13 +40,24 @@ class BaseAdapter {
 
   /**
    * Build semantic edges from AST.
-   * @param {any} ast 
-   * @param {string} contents 
+   * @param {any} ast
+   * @param {string} contents
    * @returns {Array}
    */
   buildEdges(ast, contents) {
     // Optional: default to empty array
     return [];
+  }
+
+  /**
+   * Extract cross-language API contracts (HTTP calls made and routes exposed).
+   * @param {any} ast
+   * @param {string} contents
+   * @returns {{ apiCalls: Array, apiRoutes: Array }}
+   */
+  extractApiContracts(ast, contents) {
+    // Optional: languages without HTTP semantics return empty contracts
+    return { apiCalls: [], apiRoutes: [] };
   }
 }
 

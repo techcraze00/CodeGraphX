@@ -152,6 +152,62 @@ class PythonAdapter extends BaseAdapter {
     }
     return Array.from(new Set(calls));
   }
+
+  /**
+   * Extract HTTP routes from Flask/FastAPI-style decorators:
+   *   @app.route('/users', methods=['GET', 'POST'])
+   *   @app.get('/users')  /  @router.post('/items/{id}')
+   */
+  extractApiContracts(tree, contents) {
+    const apiRoutes = [];
+    if (!tree || !tree.rootNode) return { apiCalls: [], apiRoutes };
+
+    const HTTP_METHODS = new Set(['get', 'post', 'put', 'delete', 'patch', 'head', 'options']);
+    const stack = [tree.rootNode];
+    while (stack.length) {
+      const node = stack.pop();
+      if (!node) continue;
+
+      if (node.type === 'decorated_definition') {
+        let definition = null;
+        const decorators = [];
+        for (let i = 0; i < node.namedChildCount; i++) {
+          const child = node.namedChild(i);
+          if (child.type === 'decorator') decorators.push(child.text);
+          else if (['class_definition', 'function_definition'].includes(child.type)) definition = child;
+        }
+        const handlerName = definition?.childForFieldName('name')?.text;
+        if (!handlerName) continue;
+
+        for (const dec of decorators) {
+          // @receiver.verb('/path' ...) — verb is route/get/post/...
+          const match = dec.match(/^@\s*[\w.]+\.(\w+)\s*\(\s*(['"])([^'"]*)\2/);
+          if (!match) continue;
+          const verb = match[1].toLowerCase();
+          const routePath = match[3];
+
+          if (verb === 'route') {
+            // Flask: methods kwarg lists the verbs, defaulting to GET
+            const methodsMatch = dec.match(/methods\s*=\s*\[([^\]]*)\]/);
+            const methods = methodsMatch
+              ? methodsMatch[1].split(',').map(m => m.replace(/['"\s]/g, '').toUpperCase()).filter(Boolean)
+              : ['GET'];
+            for (const method of methods) {
+              apiRoutes.push({ method, path: routePath, handlerName, framework: 'flask' });
+            }
+          } else if (HTTP_METHODS.has(verb)) {
+            apiRoutes.push({ method: verb.toUpperCase(), path: routePath, handlerName, framework: 'fastapi' });
+          }
+        }
+      }
+
+      for (let i = node.namedChildCount - 1; i >= 0; i--) {
+        stack.push(node.namedChild(i));
+      }
+    }
+
+    return { apiCalls: [], apiRoutes };
+  }
 }
 
 module.exports = PythonAdapter;

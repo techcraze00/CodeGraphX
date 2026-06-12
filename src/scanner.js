@@ -108,7 +108,18 @@ async function runScan(projectRoot, config, mcpMode = false) {
   store.saveCache();
   
   const filesData = store.getFilesData();
-  const edges = buildEdges(filesData);
+  const astEdges = buildEdges(filesData);
+
+  // Phase 6: cross-language API linking (frontend HTTP calls -> backend routes)
+  let apiEdges = [];
+  try {
+    const { linkApiContracts } = require('./cross-language-linker');
+    apiEdges = linkApiContracts(filesData);
+  } catch (e) {
+    if (!mcpMode) console.warn('[X-LANG] Could not link API contracts:', e.message);
+    else process.stderr.write(`[CodeGraphX] Cross-language link error: ${e.message}\n`);
+  }
+  const edges = astEdges.concat(apiEdges);
 
   // New logic: persist edges
   try {
@@ -128,8 +139,8 @@ async function runScan(projectRoot, config, mcpMode = false) {
           from_symbol_id: fromId,
           to_symbol_id: toId,
           type: e.type,
-          confidence: 1.0,
-          discovered_by: 'AST',
+          confidence: e.confidence ?? 1.0,
+          discovered_by: e.type === 'API_CALLS' ? 'CROSS_LANGUAGE' : 'AST',
           edge_hash: computeHash(`${fromId}-${toId}-${e.type}`),
           valid_from_commit_id: commitId
         };

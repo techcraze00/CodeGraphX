@@ -1,6 +1,7 @@
 const Parser = require('tree-sitter');
 const JavaScript = require('tree-sitter-javascript');
 const BaseAdapter = require('../base-adapter');
+const { extractApiContracts } = require('./api-contracts');
 
 class JavaScriptAdapter extends BaseAdapter {
   constructor() {
@@ -154,6 +155,10 @@ class JavaScriptAdapter extends BaseAdapter {
       }
     }
     return Array.from(new Set(calls));
+  }
+
+  extractApiContracts(tree, contents) {
+    return extractApiContracts(tree);
   }
 }
 
