@@ -71,5 +71,8 @@
     "@types/pg": "^8.20.0",
     "babel-jest": "^30.4.1",
     "jest": "^30.4.2"
+  },
+  "overrides": {
+    "js-yaml": "^4.2.0"
   }
 }
