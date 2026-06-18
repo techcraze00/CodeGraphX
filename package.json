@@ -1,14 +1,45 @@
 {
   "name": "codegraphx",
-  "version": "1.0.5",
-  "description": "",
+  "version": "1.1.0",
+  "description": "Token-efficient codebase graph engine for AI coding agents. Tree-sitter parsing, SQLite semantic graph, impact tracing, and an MCP server with zero-config auto-indexing.",
   "main": "src/cli.js",
   "scripts": {
     "test": "jest"
   },
-  "keywords": [],
-  "author": "",
-  "license": "ISC",
+  "keywords": [
+    "mcp",
+    "model-context-protocol",
+    "code-graph",
+    "code-analysis",
+    "tree-sitter",
+    "ast",
+    "ai-agents",
+    "claude",
+    "gemini",
+    "impact-analysis",
+    "dependency-graph",
+    "sqlite"
+  ],
+  "author": "Prayas Jadhav",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/techcraze00/CodeGraphX.git"
+  },
+  "homepage": "https://github.com/techcraze00/CodeGraphX#readme",
+  "bugs": {
+    "url": "https://github.com/techcraze00/CodeGraphX/issues"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "files": [
+    "bin/",
+    "src/",
+    "README.md",
+    "LICENSE",
+    "mcp-setup.md"
+  ],
   "type": "commonjs",
   "bin": {
     "codegraphx": "bin/codegraphx",
@@ -17,16 +48,28 @@
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.29.0",
+    "@octokit/webhooks": "^14.2.0",
     "@toon-format/toon": "^2.1.0",
+    "better-sqlite3": "^12.10.0",
     "bloom-filters": "^3.0.4",
     "chokidar": "^5.0.0",
     "commander": "^14.0.3",
+    "dotenv": "^17.4.2",
+    "kysely": "^0.28.17",
+    "pg": "^8.20.0",
     "tree-sitter": "0.21.1",
-    "tree-sitter-python": "0.21.0",
-    "tree-sitter-javascript": "0.21.0",
-    "tree-sitter-typescript": "0.23.2",
-    "tree-sitter-html": "0.23.2",
     "tree-sitter-css": "0.21.0",
+    "tree-sitter-html": "0.23.2",
+    "tree-sitter-javascript": "0.21.0",
+    "tree-sitter-python": "0.21.0",
+    "tree-sitter-typescript": "0.23.2",
     "ws": "^8.20.0"
+  },
+  "devDependencies": {
+    "@babel/core": "^7.29.7",
+    "@babel/preset-env": "^7.29.7",
+    "@types/pg": "^8.20.0",
+    "babel-jest": "^30.4.1",
+    "jest": "^30.4.2"
   }
 }

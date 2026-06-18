@@ -1,0 +1,207 @@
+// tests/store/sql-store.test.js
+const { db, closeDb, dialectType } = require('../../src/db');
+const { runMigrations } = require('../../src/db/migrator');
+const { SqlGraphStore } = require('../../src/store/sql-store');
+const { sql } = require('kysely');
+
+describe('SqlGraphStore', () => {
+  let store;
+  let repoId;
+
+  beforeAll(async () => {
+    // Start fresh
+    if (dialectType === 'postgres') {
+        await sql`DROP SCHEMA public CASCADE; CREATE SCHEMA public;`.execute(db);
+    } else {
+        const tables = ['unresolved_symbols', 'dependencies', 'embeddings', 'edges', 'symbols', 'files', 'file_blobs', 'index_jobs', 'commits', 'repositories', 'kysely_migration', 'kysely_migration_lock'];
+        for (const table of tables) {
+          await db.schema.dropTable(table).ifExists().execute();
+        }
+    }
+    await runMigrations();
+    store = new SqlGraphStore(db);
+    
+    // Setup base repo
+    const repo = await db.insertInto('repositories')
+      .values({ 
+        id: require('crypto').randomUUID(),
+        name: 'test-repo', 
+        path: '/test',
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString()
+      })
+      .returning('id').executeTakeFirstOrThrow();
+    repoId = repo.id;
+  });
+
+  afterAll(async () => {
+    await closeDb();
+  });
+
+  test('can insert a new commit and retrieve its ID', async () => {
+    const commitId = await store.addCommit(repoId, 'abc123hash', 'Initial commit');
+    expect(commitId).toBeDefined();
+
+    const commit = await db.selectFrom('commits').selectAll().where('id', '=', commitId).executeTakeFirst();
+    expect(commit.hash).toBe('abc123hash');
+  });
+
+  test('can retrieve graph state at a specific commit using SCD2 logic', async () => {
+    const commit1Id = await store.addCommit(repoId, 'commit1', 'First commit');
+    const commit2Id = await store.addCommit(repoId, 'commit2', 'Second commit');
+
+    // Force distinct timestamps
+    await db.updateTable('commits').set({ timestamp: new Date(Date.now() - 10000).toISOString() }).where('id', '=', commit1Id).execute();
+    await db.updateTable('commits').set({ timestamp: new Date().toISOString() }).where('id', '=', commit2Id).execute();
+
+    // Insert mock file, valid from commit1, valid to commit2 (closed)
+    const blob1 = 'hash1';
+    await db.insertInto('file_blobs').values({ content_hash: blob1, storage_type: 'local' }).execute();
+    await db.insertInto('files').values({
+      id: require('crypto').randomUUID(),
+      repository_id: repoId,
+      path: '/index.js',
+      content_hash: blob1,
+      valid_from_commit_id: commit1Id,
+      valid_to_commit_id: commit2Id
+    }).execute();
+
+    // Insert mock file, valid from commit2, open
+    const blob2 = 'hash2';
+    await db.insertInto('file_blobs').values({ content_hash: blob2, storage_type: 'local' }).execute();
+    await db.insertInto('files').values({
+      id: require('crypto').randomUUID(),
+      repository_id: repoId,
+      path: '/index.js',
+      content_hash: blob2,
+      valid_from_commit_id: commit2Id,
+      valid_to_commit_id: null
+    }).execute();
+
+    const filesAtCommit1 = await store.getFilesAtCommit(repoId, commit1Id);
+    expect(filesAtCommit1).toHaveLength(1);
+    expect(filesAtCommit1[0].content_hash).toBe('hash1');
+
+    const filesAtCommit2 = await store.getFilesAtCommit(repoId, commit2Id);
+    expect(filesAtCommit2).toHaveLength(1);
+    expect(filesAtCommit2[0].content_hash).toBe('hash2');
+  });
+
+  test('updateFile dedups blobs and correctly handles SCD2 invalidation', async () => {
+    const commitId1 = await store.addCommit(repoId, 'hash-file-1', 'msg');
+    const commitId2 = await store.addCommit(repoId, 'hash-file-2', 'msg2');
+
+    // Add a file
+    const fileId1 = await store.updateFile(repoId, commitId1, '/app.js', 'content-hash-A', 'javascript');
+    expect(fileId1).toBeDefined();
+
+    // Update same file with new hash in new commit
+    const fileId2 = await store.updateFile(repoId, commitId2, '/app.js', 'content-hash-B', 'javascript');
+    expect(fileId2).not.toBe(fileId1);
+
+    // Check that old file is closed
+    const oldFile = await db.selectFrom('files').where('id', '=', fileId1).selectAll().executeTakeFirst();
+    expect(oldFile.valid_to_commit_id).toBe(commitId2);
+
+    // Check that new file is open
+    const newFile = await db.selectFrom('files').where('id', '=', fileId2).selectAll().executeTakeFirst();
+    expect(newFile.valid_from_commit_id).toBe(commitId2);
+    expect(newFile.valid_to_commit_id).toBeNull();
+  });
+
+  test('updateSymbols handles invalidation and creation correctly', async () => {
+    const commitId1 = await store.addCommit(repoId, 'sym-1', 'msg');
+    const commitId2 = await store.addCommit(repoId, 'sym-2', 'msg2');
+    const fileId = await store.updateFile(repoId, commitId1, '/syms.js', 'hashX', 'javascript');
+
+    const initialSymbols = [{
+      qualified_name: 'funcA',
+      name: 'funcA',
+      kind: 'function',
+      symbol_hash: 'hashA1',
+      start_line: 1, end_line: 5, start_column: 1, end_column: 10
+    }];
+
+    await store.updateSymbols(repoId, commitId1, fileId, initialSymbols);
+
+    // Assert symbol exists and is open
+    let activeSymbols = await db.selectFrom('symbols').where('repository_id', '=', repoId).where('valid_to_commit_id', 'is', null).selectAll().execute();
+    expect(activeSymbols).toHaveLength(1);
+    expect(activeSymbols[0].symbol_hash).toBe('hashA1');
+
+    // Update symbol: hash changes (simulating code edit inside funcA)
+    const modifiedSymbols = [{
+      qualified_name: 'funcA',
+      name: 'funcA',
+      kind: 'function',
+      symbol_hash: 'hashA2',
+      start_line: 1, end_line: 6, start_column: 1, end_column: 10
+    }];
+
+    await store.updateSymbols(repoId, commitId2, fileId, modifiedSymbols);
+
+    activeSymbols = await db.selectFrom('symbols').where('repository_id', '=', repoId).where('valid_to_commit_id', 'is', null).selectAll().execute();
+    expect(activeSymbols).toHaveLength(1);
+    expect(activeSymbols[0].symbol_hash).toBe('hashA2');
+
+    const oldSymbols = await db.selectFrom('symbols').where('repository_id', '=', repoId).where('valid_to_commit_id', 'is not', null).selectAll().execute();
+    expect(oldSymbols).toHaveLength(1);
+    expect(oldSymbols[0].symbol_hash).toBe('hashA1');
+    expect(oldSymbols[0].valid_to_commit_id).toBe(commitId2);
+  });
+
+  test('invalidating a symbol also invalidates connected edges', async () => {
+    const c1 = await store.addCommit(repoId, 'edge-1', 'msg');
+    const f1 = await store.updateFile(repoId, c1, '/a.js', 'hA', 'javascript');
+    
+    await store.updateSymbols(repoId, c1, f1, [
+      { qualified_name: 'A', name: 'A', kind: 'class', symbol_hash: 'A1', start_line:1, end_line:1, start_column:1, end_column:1 },
+      { qualified_name: 'B', name: 'B', kind: 'class', symbol_hash: 'B1', start_line:2, end_line:2, start_column:1, end_column:1 }
+    ]);
+
+    const syms = await db.selectFrom('symbols').where('repository_id', '=', repoId).where('valid_to_commit_id', 'is', null).selectAll().execute();
+    const idA = syms.find(s => s.name === 'A').id;
+    const idB = syms.find(s => s.name === 'B').id;
+
+    await store.updateEdges(repoId, c1, [{
+      from_symbol_id: idA, to_symbol_id: idB, type: 'CALLS', confidence: 1.0, discovered_by: 'AST', edge_hash: 'edge1'
+    }]);
+
+    // Now commit 2 updates Symbol A
+    const c2 = await store.addCommit(repoId, 'edge-2', 'msg2');
+    
+    await store.updateSymbols(repoId, c2, f1, [
+      { qualified_name: 'A', name: 'A', kind: 'class', symbol_hash: 'A2', start_line:1, end_line:1, start_column:1, end_column:1 },
+      { qualified_name: 'B', name: 'B', kind: 'class', symbol_hash: 'B1', start_line:2, end_line:2, start_column:1, end_column:1 }
+    ]);
+
+    // Edges connected to old 'A' must be invalidated
+    const oldEdges = await db.selectFrom('edges').where('valid_to_commit_id', 'is not', null).selectAll().execute();
+    expect(oldEdges).toHaveLength(1);
+    expect(oldEdges[0].valid_to_commit_id).toBe(c2);
+  });
+
+  test('getChangesInCommit identifies added, modified, and removed symbols', async () => {
+    const c1 = await store.addCommit(repoId, 'diff-1', 'Initial');
+    const f1 = await store.updateFile(repoId, c1, '/lib.js', 'h1', 'javascript');
+    
+    // Symbols in C1: A (func), B (func)
+    await store.updateSymbols(repoId, c1, f1, [
+      { qualified_name: 'A', name: 'A', kind: 'function', symbol_hash: 'hA1', start_line: 1, end_line: 5 },
+      { qualified_name: 'B', name: 'B', kind: 'function', symbol_hash: 'hB1', start_line: 10, end_line: 15 }
+    ]);
+
+    const c2 = await store.addCommit(repoId, 'diff-2', 'Update');
+    // Symbols in C2: A (modified), C (added), B (removed)
+    await store.updateSymbols(repoId, c2, f1, [
+      { qualified_name: 'A', name: 'A', kind: 'function', symbol_hash: 'hA2', start_line: 1, end_line: 6 }, // modified
+      { qualified_name: 'C', name: 'C', kind: 'function', symbol_hash: 'hC1', start_line: 20, end_line: 25 }  // added
+    ]);
+
+    const changes = await store.getChangesInCommit(repoId, c2);
+    
+    expect(changes.added.map(s => s.qualified_name)).toContain('C');
+    expect(changes.modified.map(s => s.qualified_name)).toContain('A');
+    expect(changes.removed.map(s => s.qualified_name)).toContain('B');
+  });
+});

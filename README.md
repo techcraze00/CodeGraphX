@@ -8,7 +8,7 @@
   <a href="https://www.npmjs.com/package/codegraphx"><img src="https://img.shields.io/npm/v/codegraphx.svg" alt="npm version" /></a>
   <a href="https://www.npmjs.com/package/codegraphx"><img src="https://img.shields.io/npm/dm/codegraphx.svg" alt="npm downloads" /></a>
   <a href="LICENSE"><img src="https://img.shields.io/npm/l/codegraphx.svg" alt="license" /></a>
-  <a href="https://nodejs.org"><img src="https://img.shields.io/badge/node-%3E%3D16-blue.svg" alt="node version" /></a>
+  <a href="https://nodejs.org"><img src="https://img.shields.io/badge/node-%3E%3D18-blue.svg" alt="node version" /></a>
 </p>
 
 > **CodeGraphX** is a local, token-efficient codebase graphing system designed for AI coding agents and human developers. It uses Tree-sitter to parse code incrementally, builds a dependency graph, and exposes it via CLI or MCP server — eliminating costly file-scanning loops and enabling instant symbol lookup.
@@ -48,7 +48,7 @@ npm install --save-dev codegraphx
 
 ```bash
 codegraphx --version
-# Output: 1.0.5
+# Output: 1.1.0
 ```
 
 ---
@@ -100,75 +100,101 @@ codegraphx dashboard
 
 CodeGraphX includes a **Model Context Protocol (MCP)** server that allows AI coding agents to query your codebase structure intelligently — saving tokens and eliminating cold-start scanning.
 
+**Zero-setup:** you do not need to run a scan first. On its first start in a project, the server automatically indexes the codebase in the background. While indexing, `get_graph_status` reports `"indexing"`; once it reports `"ready"`, every tool is live.
+
 ### Available MCP Tools
 
 | Tool | Description | Parameters |
 |------|-------------|------------|
-| `get_graph_status` | Returns initialization status and graph metrics | None |
-| `list_files` | Lists all indexed files with symbol summaries | `filter?: string` |
-| `query_symbol` | Get detailed info about a symbol (calls, location, imports) | `name: string` (use `file::symbol` for exact match) |
-| `check_symbol_exists` | Instant O(1) symbol existence check via Bloom filter | `name: string` |
-| `trace_impact` | Trace upstream/downstream dependency chain | `symbol: string`, `direction: "upstream" \| "downstream"`, `depth?: number` |
+| `get_graph_status` | Readiness check: `indexing`, `ready`, or `error`, plus file count | None |
+| `list_files` | Lists all indexed files | `filter?: string` |
+| `check_symbol_exists` | Instant O(1) Bloom-filter lookup — `probable_yes` / `definite_no` | `name: string` |
+| `explain_impact` | Blast radius of a symbol: who uses it upstream, what it breaks downstream | `symbol_name: string` |
+| `verify_task` | Compare a task description against a commit's actual changes — status, changed symbols, untested additions | `task_description: string`, `commit_hash?: string` |
 | `get_session_diff` | Summarize changes in current Git session/branch | `branch?: string` (default: `"HEAD"`) |
 
 ### Example Agent Workflow
 
 ```
-User: "Where is the validateInput function defined and what calls it?"
+User: "What breaks if I change the validateInput function?"
 
 Agent (via MCP):
-1. query_symbol({ name: "validateInput" })
-   → Returns: [{ file: "src/utils.js", type: "function", location: "row 42", called_by: ["src/auth.js::login"] }]
+1. check_symbol_exists({ name: "validateInput" })
+   → { "exists": "probable_yes" }
 
-2. trace_impact({ symbol: "src/utils.js::validateInput", direction: "upstream" })
-   → Returns full call chain with depth control
+2. explain_impact({ symbol_name: "validateInput" })
+   → { "used_by_upstream": ["src/auth.js::login"], "breaks_downstream": ["src/api.js::handleRequest"] }
 
 Result: Instant answer without scanning 50+ files.
+```
+
+### Picking the Project Root
+
+The server indexes the directory it is started in. If your MCP client doesn't set a working directory, pass it explicitly — either way works:
+
+```bash
+cgx-mcp --project-root /path/to/your/project
+# or
+CGX_PROJECT_ROOT=/path/to/your/project cgx-mcp
 ```
 
 ---
 
 ## 🔌 Connecting MCP to AI Agents
 
-### 🧭 Gemini CLI
+### 💻 Claude Code (CLI)
 
-Create or edit `.gemini/mcp.json` in your project root:
+From inside your project directory:
+
+```bash
+claude mcp add codegraphx -- npx -y -p codegraphx cgx-mcp
+```
+
+Or in your project's `.mcp.json`:
 
 ```json
 {
   "mcpServers": {
     "codegraphx": {
       "command": "npx",
-      "args": ["-y", "codegraphx", "cgx-mcp"],
-      "cwd": "/absolute/path/to/your/project"
+      "args": ["-y", "-p", "codegraphx", "cgx-mcp"]
     }
   }
 }
 ```
-
-> 💡 **Pro Tip**: Use the absolute path to `node` instead of `npx` for maximum reliability:
-> ```json
-> {
->   "command": "/usr/local/bin/node",
->   "args": ["/usr/local/bin/cgx-mcp"]
-> }
-> ```
 
 ### 🤖 Claude Desktop
 
-Edit `~/Library/Application Support/Claude/claude_desktop_config.json` (macOS) or `%APPDATA%\Claude\claude_desktop_config.json` (Windows):
+Edit `~/Library/Application Support/Claude/claude_desktop_config.json` (macOS) or `%APPDATA%\Claude\claude_desktop_config.json` (Windows). Claude Desktop has no project directory, so set the root explicitly:
 
 ```json
 {
   "mcpServers": {
     "codegraphx": {
       "command": "npx",
-      "args": ["-y", "codegraphx", "cgx-mcp"],
-      "cwd": "/absolute/path/to/your/project"
+      "args": ["-y", "-p", "codegraphx", "cgx-mcp", "--project-root", "/path/to/your/project"]
     }
   }
 }
 ```
+
+### 🧭 Gemini CLI
+
+In your project's `.gemini/settings.json` (use an absolute path to `node` — Gemini doesn't inherit your shell PATH; see `mcp-setup.md` for troubleshooting):
+
+```json
+{
+  "mcpServers": {
+    "codegraphx": {
+      "command": "/ABSOLUTE/PATH/TO/node",
+      "args": ["/ABSOLUTE/PATH/TO/node_modules/codegraphx/bin/cgx-mcp"],
+      "cwd": "/ABSOLUTE/PATH/TO/YOUR_PROJECT"
+    }
+  }
+}
+```
+
+> 💡 **Pro Tip**: If your client ignores `cwd`, add `"--project-root", "/path/to/project"` to `args` — it takes precedence over the working directory.
 
 ### 🪄 Cursor / Windsurf / Other MCP Clients
 
@@ -187,7 +213,7 @@ After configuration, test the connection:
 # Should show: ✓ codegraphx — Connected (6 tools)
 
 # Or manually test the MCP server
-echo '{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}' | npx cgx-mcp
+echo '{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}' | npx -y -p codegraphx cgx-mcp
 ```
 
 ---

@@ -1,47 +1,46 @@
-const Parser = require('tree-sitter');
-const Python = require('tree-sitter-python');
-const JavaScript = require('tree-sitter-javascript');
-const TypeScript = require('tree-sitter-typescript').typescript;
-const HTML = require('tree-sitter-html');
-const CSS = require('tree-sitter-css');
-
-const EXT_LANG = {
-  '.py':   { lang: Python,     type: 'python' },
-  '.js':   { lang: JavaScript, type: 'javascript' },
-  '.jsx':  { lang: JavaScript, type: 'jsx' },
-  '.ts':   { lang: TypeScript, type: 'typescript' },
-  '.tsx':  { lang: TypeScript, type: 'tsx' },
-  '.html': { lang: HTML,       type: 'html' },
-  '.css':  { lang: CSS,        type: 'css' },
-};
-
-// Singleton parsers — one per language, created once, reused forever
-const parsers = new Map();
-
-function getParser(lang) {
-  if (!parsers.has(lang)) {
-    const p = new Parser();
-    p.setLanguage(lang);
-    parsers.set(lang, p);
-  }
-  return parsers.get(lang);
-}
+const { getAdapterForFile } = require('./languages');
 
 function detectLanguage(file) {
-  const ext = file.slice(file.lastIndexOf('.')).toLowerCase();
-  return EXT_LANG[ext] || EXT_LANG['.py'];
+  const { type } = getAdapterForFile(file);
+  return { type };
 }
 
 function parseFile(file, contents) {
-  const { lang, type } = detectLanguage(file);
+  const { adapter, type } = getAdapterForFile(file);
   
   try {
-    const parser = getParser(lang);
-    const tree = parser.parse(contents);
-    return { tree, type };
+    const tree = adapter.parse(contents);
+    const declaredSymbols = adapter.extractSymbols(tree, contents) || [];
+    const imports = adapter.extractImports(tree, contents) || [];
+    
+    // Aggregate calls from declared symbols AND top-level calls
+    const callsSet = new Set();
+    
+    // Capture top-level calls (those not inside any symbol)
+    const allCalls = adapter.extractCalls(tree.rootNode, contents) || [];
+    allCalls.forEach(c => callsSet.add(c));
+    
+    declaredSymbols.forEach(sym => {
+        if (sym.calls) {
+            sym.calls.forEach(c => callsSet.add(c));
+        }
+    });
+
+    const calls = Array.from(callsSet);
+
+    // Mock exports for now: treat all symbols as exported to unblock MVP phase 1
+    const exports = declaredSymbols.map(sym => ({ name: sym.name, symbolId: sym.name }));
+
+    return { 
+      tree, 
+      type,
+      exports,
+      imports,
+      declaredSymbols,
+      calls
+    };
   } catch (e) {
-    // Return null tree on parse failure so caller can handle gracefully
-    return { tree: null, type, error: e.message };
+    return { tree: null, type, error: e.message, exports: [], imports: [], declaredSymbols: [], calls: [] };
   }
 }
 
