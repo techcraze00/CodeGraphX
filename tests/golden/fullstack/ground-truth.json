@@ -1,0 +1,42 @@
+{
+  "description": "Full-stack: React-style frontend (fetch) linked across languages to an Express backend and a FastAPI backend route.",
+  "extensions": [".py", ".js"],
+  "symbols": [
+    { "id": "python::backend/main.py::global::read_user", "kind": "function" },
+    { "id": "javascript::backend/server.js::global::listUsers", "kind": "function" },
+    { "id": "javascript::backend/server.js::global::addUser", "kind": "function" },
+    { "id": "javascript::frontend/api.js::global::loadUsers", "kind": "function" },
+    { "id": "javascript::frontend/api.js::global::createUser", "kind": "function" },
+    { "id": "javascript::frontend/api.js::global::getUser", "kind": "function" }
+  ],
+  "edges": [
+    { "from": "backend/main.py", "to": "fastapi", "type": "IMPORTS" },
+    { "from": "backend/server.js", "to": "express", "type": "IMPORTS" }
+  ],
+  "apiCalls": [
+    {
+      "from": "javascript::frontend/api.js::global::loadUsers",
+      "to": "javascript::backend/server.js::global::listUsers",
+      "minConfidence": 0.9
+    },
+    {
+      "from": "javascript::frontend/api.js::global::createUser",
+      "to": "javascript::backend/server.js::global::addUser",
+      "minConfidence": 0.9
+    },
+    {
+      "from": "javascript::frontend/api.js::global::getUser",
+      "to": "python::backend/main.py::global::read_user",
+      "minConfidence": 0.7
+    }
+  ],
+  "endpoints": [
+    "python::backend/main.py::global::read_user",
+    "javascript::backend/server.js::global::listUsers",
+    "javascript::backend/server.js::global::addUser"
+  ],
+  "impact": [],
+  "doctor": {
+    "circularImports": []
+  }
+}

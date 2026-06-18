@@ -4,7 +4,8 @@
   "description": "Token-efficient codebase graph engine for AI coding agents. Tree-sitter parsing, SQLite semantic graph, impact tracing, and an MCP server with zero-config auto-indexing.",
   "main": "src/cli.js",
   "scripts": {
-    "test": "jest"
+    "test": "jest",
+    "benchmark": "node scripts/benchmark.js"
   },
   "keywords": [
     "mcp",

@@ -370,6 +370,43 @@ frontend functions across the language boundary.
 
 ---
 
+## 📊 Benchmarks / Accuracy
+
+CodeGraphX is meant to be *trusted* in place of reading code, so its graph is
+measured against a hand-labeled golden corpus (`tests/golden/`) where every
+symbol, edge, cross-language API link and import cycle is known. The same
+harness gates CI (`tests/golden/accuracy.test.js`) — a parser regression fails
+the build.
+
+Latest run (curated corpus: 3 fixtures, 9 files, 20 symbols):
+
+| Category | Precision | Recall | F1 |
+|---|---|---|---|
+| Symbols | 100% | 100% | 100% |
+| Structural edges (CALLS / IMPORTS / INHERITS) | 100% | 100% | 100% |
+| Cross-language API links | 100% | 100% | 100% |
+| Endpoint tagging | 100% | 100% | 100% |
+
+| Reasoning check | Result |
+|---|---|
+| Impact tracing (exact reachable set) | 4/4 (100%) |
+| Circular-import detection (recall) | 1/1 (100%) |
+| Circular-import false positives | 0 |
+| Deterministic across re-scans | yes |
+
+Reproduce and regenerate [`BENCHMARK.md`](BENCHMARK.md) + `benchmark-results.json`:
+
+```bash
+npm run benchmark
+```
+
+> Numbers reflect the controlled golden corpus, not arbitrary real-world repos —
+> they verify extraction *correctness*, not coverage of every language construct.
+> Extend the corpus under `tests/golden/<fixture>/` with a `ground-truth.json` to
+> raise the bar.
+
+---
+
 ## 🧪 Testing
 
 ```bash

@@ -1,0 +1,136 @@
+{
+  "generatedAt": "2026-06-18T16:31:16.634Z",
+  "version": "1.1.0",
+  "node": "v22.17.0",
+  "gitCommit": "dd0a643",
+  "corpus": {
+    "fixtures": 3,
+    "files": 9,
+    "symbols": 20
+  },
+  "metrics": {
+    "symbols": {
+      "tp": 20,
+      "fp": 0,
+      "fn": 0,
+      "precision": 1,
+      "recall": 1,
+      "f1": 1
+    },
+    "structuralEdges": {
+      "tp": 11,
+      "fp": 0,
+      "fn": 0,
+      "precision": 1,
+      "recall": 1,
+      "f1": 1
+    },
+    "crossLanguageApi": {
+      "tp": 3,
+      "fp": 0,
+      "fn": 0,
+      "precision": 1,
+      "recall": 1,
+      "f1": 1
+    },
+    "endpointTagging": {
+      "tp": 3,
+      "fp": 0,
+      "fn": 0,
+      "precision": 1,
+      "recall": 1,
+      "f1": 1
+    },
+    "impactTracing": {
+      "passed": 4,
+      "total": 4,
+      "accuracy": 1
+    },
+    "circularImportDetection": {
+      "expected": 1,
+      "detected": 1,
+      "falsePositives": 0,
+      "recall": 1
+    },
+    "determinism": true,
+    "throughput": {
+      "filesPerSec": 82.6,
+      "symbolsPerSec": 183.5,
+      "totalMs": 109
+    }
+  },
+  "perFixture": [
+    {
+      "fixture": "python-app",
+      "symbols": {
+        "precision": 1,
+        "recall": 1,
+        "f1": 1
+      },
+      "structuralEdges": {
+        "precision": 1,
+        "recall": 1,
+        "f1": 1
+      },
+      "crossLanguageApi": {
+        "precision": 1,
+        "recall": 1,
+        "f1": 1
+      },
+      "impact": {
+        "passed": 2,
+        "total": 2,
+        "failures": []
+      },
+      "deterministic": true
+    },
+    {
+      "fixture": "js-app",
+      "symbols": {
+        "precision": 1,
+        "recall": 1,
+        "f1": 1
+      },
+      "structuralEdges": {
+        "precision": 1,
+        "recall": 1,
+        "f1": 1
+      },
+      "crossLanguageApi": {
+        "precision": 1,
+        "recall": 1,
+        "f1": 1
+      },
+      "impact": {
+        "passed": 2,
+        "total": 2,
+        "failures": []
+      },
+      "deterministic": true
+    },
+    {
+      "fixture": "fullstack",
+      "symbols": {
+        "precision": 1,
+        "recall": 1,
+        "f1": 1
+      },
+      "structuralEdges": {
+        "precision": 1,
+        "recall": 1,
+        "f1": 1
+      },
+      "crossLanguageApi": {
+        "precision": 1,
+        "recall": 1,
+        "f1": 1
+      },
+      "impact": {
+        "passed": 0,
+        "total": 0,
+        "failures": []
+      },
+      "deterministic": true
+    }
+  ]
+}

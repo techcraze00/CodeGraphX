@@ -1,0 +1,33 @@
+{
+  "description": "Python: call chain, class inheritance, cross-module import, and a deliberate circular import (mod_x <-> mod_y).",
+  "extensions": [".py"],
+  "symbols": [
+    { "id": "python::mod_x.py::global::x", "kind": "function" },
+    { "id": "python::mod_y.py::global::y", "kind": "function" },
+    { "id": "python::mod_y.py::global::use_x", "kind": "function" },
+    { "id": "python::models.py::global::Animal", "kind": "class" },
+    { "id": "python::models.py::global::__init__", "kind": "function" },
+    { "id": "python::models.py::global::speak", "kind": "function" },
+    { "id": "python::models.py::global::Dog", "kind": "class" },
+    { "id": "python::service.py::global::c", "kind": "function" },
+    { "id": "python::service.py::global::b", "kind": "function" },
+    { "id": "python::service.py::global::a", "kind": "function" }
+  ],
+  "edges": [
+    { "from": "python::service.py::global::b", "to": "python::service.py::global::c", "type": "CALLS" },
+    { "from": "python::service.py::global::a", "to": "python::models.py::global::Dog", "type": "CALLS" },
+    { "from": "python::service.py::global::a", "to": "python::service.py::global::b", "type": "CALLS" },
+    { "from": "mod_x.py", "to": "mod_y", "type": "IMPORTS" },
+    { "from": "mod_y.py", "to": "mod_x", "type": "IMPORTS" },
+    { "from": "service.py", "to": "models", "type": "IMPORTS" }
+  ],
+  "apiCalls": [],
+  "endpoints": [],
+  "impact": [
+    { "symbol": "python::service.py::global::a", "direction": "downstream", "depth": 5, "expected": ["b", "c"] },
+    { "symbol": "python::service.py::global::c", "direction": "upstream", "depth": 5, "expected": ["a", "b"] }
+  ],
+  "doctor": {
+    "circularImports": [["mod_x.py", "mod_y.py"]]
+  }
+}

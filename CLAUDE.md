@@ -100,3 +100,12 @@ The skill spec in `docs/superpowers/skills/cgx/SKILL.md` describes the preferred
 ### Test layout
 
 Tests mirror `src/` under `tests/`. The Jest config (`jest.config.js`) targets `tests/**/*.test.js` only (not the legacy `test/` directory). Tests that hit the DB create in-memory SQLite instances to avoid `.codegraphx.db` contamination.
+
+### Accuracy benchmark / golden corpus
+
+`tests/golden/` holds hand-labeled mini projects (`python-app`, `js-app`, `fullstack`), each with a `ground-truth.json` listing expected symbols, edges, cross-language API links, endpoints, impact traces, and import cycles. `tests/golden/harness.js` is the shared, jest-free engine: it copies a fixture to a temp dir, resets the in-memory DB, runs `runScan`, and scores precision/recall/F1 + impact/doctor/determinism against ground truth. Two consumers:
+
+- `tests/golden/accuracy.test.js` — CI gate; a regression (dropped symbol, misrouted API call) fails `npm test`.
+- `scripts/benchmark.js` (`npm run benchmark`) — writes `benchmark-results.json` + `BENCHMARK.md` and prints a summary; numbers feed the README Benchmarks section.
+
+Extend by adding `tests/golden/<fixture>/` source files + `ground-truth.json` (ids use the `LANG::relpath::scope::name` form). `BENCHMARK.md` / `benchmark-results.json` are committed artifacts but excluded from the npm `files` whitelist.
