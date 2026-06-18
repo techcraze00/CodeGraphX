@@ -22,6 +22,14 @@ async function runScan() {
 }
 
 program
+  .command('setup')
+  .description('Configure CodeGraphX for your coding CLIs (MCP server + skill, zero hand-editing)')
+  .option('--agents <list>', 'Comma-separated agents to configure (claude,gemini,opencode,cursor) — skips the prompt')
+  .option('--project', 'Register at project scope (current directory) instead of user/global')
+  .option('-y, --yes', 'Non-interactive: configure all detected agents without prompting')
+  .action(async (opts) => { await require('./setup').runSetup(opts); });
+
+program
   .command('init')
   .description('Initialize the code graph project')
   .action(async () => { await runScan(); });

@@ -271,13 +271,14 @@ Last updated: ${new Date().toISOString()}
 - Symbols: ${snapshot.files.reduce((n, f) => n + (f.symbols?.length||0), 0)}
 
 ## MCP Server
-Add to .gemini/mcp.json:
+Run \`cgx setup\` once to wire this up automatically for your coding CLI.
+Manual fallback — add to .gemini/settings.json (absolute node path avoids Gemini's PATH gotcha):
 \`\`\`json
 {
   "mcpServers": {
     "codegraphx": {
-      "command": "npx",
-      "args": ["cgx-mcp"],
+      "command": "${process.execPath}",
+      "args": ["${require('path').resolve(__dirname, '../bin/cgx-mcp')}"],
       "cwd": "${projectRoot}"
     }
   }

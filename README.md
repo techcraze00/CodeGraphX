@@ -143,6 +143,31 @@ CGX_PROJECT_ROOT=/path/to/your/project cgx-mcp
 
 ## 🔌 Connecting MCP to AI Agents
 
+### ⚡ One-command setup (Recommended)
+
+After installing, run a single command — no hand-editing config files, no hunting for absolute paths:
+
+```bash
+cgx setup
+```
+
+It detects the coding CLIs you have installed (Claude Code, Gemini CLI, OpenCode, Cursor), lets you multi-select which to configure, then wires each one automatically:
+
+- **MCP server** — registered via the CLI's native command (`claude mcp add`, `gemini mcp add`, …) with a JSON-config fallback. Uses an absolute Node path + the bundled `cgx-mcp`, so it works for global *and* local installs and sidesteps Gemini's PATH gotcha.
+- **Skill / instructions** — drops the CodeGraphX usage skill into each CLI's format (`~/.claude/skills/cgx/SKILL.md`, `GEMINI.md`, `AGENTS.md`, Cursor rules) so the agent knows to use cgx.
+
+```bash
+cgx setup                                  # interactive multi-select
+cgx setup --agents claude,gemini --yes     # non-interactive (CI / scripted)
+cgx setup --project                        # register for the current repo only
+```
+
+Registration is **user/global** by default, so you run it once and it works in every project — `cgx-mcp` resolves the project from the directory your CLI launches in. Existing config (other MCP servers, settings) is preserved; a `.cgx-bak` backup is written before the first edit.
+
+Then just open your coding CLI in any project and ask it to *"use cgx to explore this codebase"*.
+
+The manual per-agent instructions below remain available if you prefer to wire things up yourself.
+
 ### 💻 Claude Code (CLI)
 
 From inside your project directory:

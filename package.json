@@ -37,6 +37,7 @@
   "files": [
     "bin/",
     "src/",
+    "skills/",
     "README.md",
     "LICENSE",
     "mcp-setup.md"
@@ -48,6 +49,7 @@
     "cgx-mcp": "bin/cgx-mcp"
   },
   "dependencies": {
+    "@clack/prompts": "^0.7.0",
     "@modelcontextprotocol/sdk": "^1.29.0",
     "@octokit/webhooks": "^14.2.0",
     "@toon-format/toon": "^2.1.0",

@@ -5,6 +5,11 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## Commands
 
 ```bash
+# One-command setup: wire CodeGraphX (MCP server + skill) into your coding CLIs
+node bin/cgx setup                                 # interactive multi-select of detected CLIs
+node bin/cgx setup --agents claude,gemini --yes    # non-interactive
+node bin/cgx setup --project                        # project scope instead of user/global
+
 # Run all tests
 npm test
 
@@ -69,6 +74,9 @@ The DB schema is intentionally append-only. Rows are **never deleted**. Instead,
 | `src/sdk/index.js` | `IntelligenceSDK` — programmatic API for embedding CGX in other tools |
 | `src/sdk/drift-detector.js` | Detects architectural drift via downstream impact tracing + rule matching |
 | `src/server/mcp-server.js` | `CodeGraphXServer` — MCP stdio server; exposes `get_graph_status`, `list_files`, `check_symbol_exists`, `explain_impact`, `verify_task`, `get_session_diff` |
+| `src/setup/index.js` | `runSetup(opts)` — `cgx setup` orchestrator; detects coding CLIs, multi-selects, wires each via its adapter |
+| `src/setup/adapters/*.js` | Per-CLI adapters (claude, gemini, opencode, cursor): `configureMcp()` (native `<cli> mcp add` → JSON file fallback) + `installSkill()`. MCP cmd = absolute node + bundled `bin/cgx-mcp` |
+| `src/setup/util.js` | Setup helpers: `which`, `runCli`, `mergeJsonFile` (backup-once, never clobber), skill copy / markdown-block upsert |
 | `src/git/commit-scanner.js` | Scans git history and annotates commits in the DB |
 
 ### Config
