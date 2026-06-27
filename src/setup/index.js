@@ -5,6 +5,7 @@ const path = require('path');
 const ADAPTERS = [
   require('./adapters/claude'),
   require('./adapters/gemini'),
+  require('./adapters/antigravity'),
   require('./adapters/opencode'),
   require('./adapters/cursor'),
 ];
