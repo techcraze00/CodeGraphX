@@ -11,7 +11,7 @@ class JavaScriptAdapter extends BaseAdapter {
   }
 
   parse(contents) {
-    return this.parser.parse(contents);
+    return this.safeParse(this.parser, contents);
   }
 
   extractSymbols(tree, contents) {

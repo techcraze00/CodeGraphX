@@ -139,4 +139,13 @@ import os as myos
     expect(Array.isArray(result.declaredSymbols)).toBe(true);
     expect(Array.isArray(result.calls)).toBe(true);
   });
+
+  test('parses files larger than the 32 KB tree-sitter default buffer', () => {
+    // node-tree-sitter's default read buffer is 32 KB; without sizing it,
+    // larger sources throw "Invalid argument". ~48 KB exercises the fix.
+    const big = 'def f_x():\n    return 1\n'.repeat(2000);
+    const result = parseFile('big.py', big);
+    expect(result.error).toBeFalsy();
+    expect(result.declaredSymbols.length).toBeGreaterThan(0);
+  });
 });
