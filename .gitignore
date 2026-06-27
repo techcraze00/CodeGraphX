@@ -11,3 +11,7 @@ dummy-test-repo/
 .codegraphx.db-journal
 .codegraphx.db-wal
 .codegraphx.db-shm
+
+# Local agent/skill workspace artifacts (e.g. Antigravity skill bundles)
+.agents/
+skills-lock.json
