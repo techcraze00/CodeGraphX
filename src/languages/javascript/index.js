@@ -29,6 +29,7 @@ class JavaScriptAdapter extends BaseAdapter {
           name: nameNode ? nameNode.text : "anonymous",
           startPosition: node.startPosition,
           calls: this.extractCalls(node, contents),
+          params: this.extractParams(node),
           ontology: []
         });
       } else if (node.type === "class_declaration") {
@@ -38,6 +39,7 @@ class JavaScriptAdapter extends BaseAdapter {
           name: nameNode ? nameNode.text : "anonymous",
           startPosition: node.startPosition,
           calls: this.extractCalls(node, contents),
+          params: this.extractParams(node),
           ontology: []
         });
       } else if (node.type === "variable_declarator") {
@@ -49,6 +51,7 @@ class JavaScriptAdapter extends BaseAdapter {
              name: nameNode.text,
              startPosition: node.startPosition,
              calls: this.extractCalls(valueNode, contents),
+             params: this.extractParams(valueNode),
              ontology: []
            });
         }
@@ -116,9 +119,19 @@ class JavaScriptAdapter extends BaseAdapter {
                     if (nameNode.type === 'identifier') {
                         imports.push({ localName: nameNode.text, importedName: 'default', source });
                     } else if (nameNode.type === 'object_pattern') {
+                        // Shorthand: const { a, b } = require(...)
                         let props = nameNode.children.filter(c => c.type === 'shorthand_property_identifier_pattern');
                         for (let prop of props) {
                             imports.push({ localName: prop.text, importedName: prop.text, source });
+                        }
+                        // Renamed: const { a: b } = require(...)
+                        let pairs = nameNode.children.filter(c => c.type === 'pair_pattern');
+                        for (let pair of pairs) {
+                            let keyNode = pair.childForFieldName('key');
+                            let valNode = pair.childForFieldName('value');
+                            if (keyNode && valNode) {
+                                imports.push({ localName: valNode.text, importedName: keyNode.text, source });
+                            }
                         }
                     } else {
                         imports.push({ localName: null, importedName: null, source });
@@ -134,6 +147,37 @@ class JavaScriptAdapter extends BaseAdapter {
       }
     }
     return imports;
+  }
+
+  /**
+   * Collect parameter names for a symbol — including those of any nested
+   * functions/arrows, since `extractCalls` aggregates calls over the whole
+   * subtree (e.g. a Promise executor's `resolve`/`reject`).
+   */
+  extractParams(fnNode) {
+    const names = new Set();
+    const FN_TYPES = new Set([
+      'arrow_function', 'function_declaration', 'function_expression',
+      'function', 'method_definition', 'generator_function', 'generator_function_declaration',
+    ]);
+    const collectBindings = (n) => {
+      if (!n) return;
+      if (n.type === 'identifier' || n.type === 'shorthand_property_identifier_pattern') { names.add(n.text); return; }
+      if (n.type === 'assignment_pattern') { collectBindings(n.childForFieldName('left')); return; }
+      if (n.type === 'pair_pattern') { collectBindings(n.childForFieldName('value')); return; }
+      for (let i = 0; i < n.namedChildCount; i++) collectBindings(n.namedChild(i));
+    };
+    const stack = [fnNode];
+    while (stack.length) {
+      const n = stack.pop();
+      if (!n) continue;
+      if (FN_TYPES.has(n.type)) {
+        const p = n.childForFieldName('parameters') || n.childForFieldName('parameter');
+        if (p) collectBindings(p);
+      }
+      for (let i = 0; i < n.namedChildCount; i++) stack.push(n.namedChild(i));
+    }
+    return Array.from(names);
   }
 
   extractCalls(fnNode, contents) {

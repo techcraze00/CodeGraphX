@@ -44,6 +44,7 @@ class PythonAdapter extends BaseAdapter {
             name: definition.childForFieldName("name")?.text,
             startPosition: definition.startPosition,
             calls,
+            params: this.extractParams(definition),
             decorators,
             ontology
           });
@@ -55,6 +56,7 @@ class PythonAdapter extends BaseAdapter {
           name: node.childForFieldName("name")?.text,
           startPosition: node.startPosition,
           calls,
+          params: this.extractParams(node),
           decorators: [],
           ontology: []
         });
@@ -125,6 +127,42 @@ class PythonAdapter extends BaseAdapter {
       }
     }
     return results;
+  }
+
+  /**
+   * Collect parameter names for a symbol — including those of any nested
+   * `def`/`lambda`, since `extractCalls` aggregates calls over the whole subtree.
+   */
+  extractParams(defNode) {
+    const names = new Set();
+    if (!defNode) return [];
+    const collectFrom = (p) => {
+      if (!p) return;
+      for (let i = 0; i < p.namedChildCount; i++) {
+        const c = p.namedChild(i);
+        if (c.type === 'identifier') names.add(c.text);
+        else if (c.type === 'typed_parameter') {
+          const id = c.namedChild(0);
+          if (id && id.type === 'identifier') names.add(id.text);
+        } else if (c.type === 'default_parameter' || c.type === 'typed_default_parameter') {
+          const n = c.childForFieldName('name');
+          if (n) names.add(n.text);
+        } else if (c.type === 'list_splat_pattern' || c.type === 'dictionary_splat_pattern') {
+          const id = c.namedChild(0);
+          if (id && id.type === 'identifier') names.add(id.text);
+        }
+      }
+    };
+    const stack = [defNode];
+    while (stack.length) {
+      const n = stack.pop();
+      if (!n) continue;
+      if (n.type === 'function_definition' || n.type === 'lambda') {
+        collectFrom(n.childForFieldName('parameters'));
+      }
+      for (let i = 0; i < n.namedChildCount; i++) stack.push(n.namedChild(i));
+    }
+    return Array.from(names);
   }
 
   extractCalls(fnNode, contents) {

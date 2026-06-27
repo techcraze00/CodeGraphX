@@ -184,6 +184,14 @@ function runDoctor(filesData, projectRoot) {
 
     const SELF_REFS = new Set(['self', 'cls', 'super', 'this']);
 
+    // Union of every parameter name declared in the file. A call to any of
+    // these is a local/closure binding (e.g. a nested fn calling its parent's
+    // `resolve`), not a missing top-level symbol.
+    const fileParams = new Set();
+    for (const sym of f.symbols || []) {
+      for (const p of sym.params || []) fileParams.add(p);
+    }
+
     for (const sym of f.symbols || []) {
       for (const callee of sym.calls || []) {
         // Only treat clean identifier / dotted-name targets as resolvable calls.
@@ -195,12 +203,17 @@ function runDoctor(filesData, projectRoot) {
         if (SELF_REFS.has(rootPart)) continue;
         if (importedNames.has(rootPart) || importedNames.has(callee)) continue;
 
+        // Method/attribute calls (foo.bar()) need receiver type resolution we
+        // don't perform — never report them. A local `b` shadowing a global
+        // symbol named `b` would otherwise make `b.trim()` look "resolved".
+        if (callee.includes('.')) continue;
+
+        // A call to a parameter (own or an enclosing scope's) is a local
+        // binding, not a missing top-level symbol.
+        if (fileParams.has(callee)) continue;
+
         const issueKey = `${sym.name}:${callee}`;
         if (fileUnresolvedSeen.has(issueKey)) continue;
-
-        if (callee.includes('.') && !knownSymbolNames.has(rootPart)) {
-          continue;
-        }
 
         if (!knownSymbolNames.has(callee)) {
           fileUnresolvedSeen.add(issueKey);

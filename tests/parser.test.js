@@ -148,4 +148,22 @@ import os as myos
     expect(result.error).toBeFalsy();
     expect(result.declaredSymbols.length).toBeGreaterThan(0);
   });
+
+  test('captures parameter names, including nested-function params', () => {
+    const adapter = ADAPTERS['.js'].adapter;
+    const src = 'function sendRequest(url){ return new Promise((resolve, reject) => resolve(url)); }';
+    const tree = adapter.parse(src);
+    const sym = adapter.extractSymbols(tree, src).find(s => s.name === 'sendRequest');
+    expect(sym.params).toEqual(expect.arrayContaining(['url', 'resolve', 'reject']));
+  });
+
+  test('captures renamed require destructure as an import', () => {
+    const adapter = ADAPTERS['.js'].adapter;
+    const src = "const { runScan: doScan } = require('./scanner');";
+    const tree = adapter.parse(src);
+    const imports = adapter.extractImports(tree, src);
+    expect(imports).toEqual(expect.arrayContaining([
+      expect.objectContaining({ localName: 'doScan', importedName: 'runScan', source: './scanner' }),
+    ]));
+  });
 });

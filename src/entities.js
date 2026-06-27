@@ -3,7 +3,7 @@ const { getAdapterForFile } = require('./languages');
 
 
 class SymbolEntity {
-  constructor({ id, name, type, file, scope, startPosition, calls, ontology }) {
+  constructor({ id, name, type, file, scope, startPosition, calls, ontology, params }) {
     this.id = id;
     this.name = name;
     this.type = type;
@@ -12,6 +12,7 @@ class SymbolEntity {
     this.startPosition = startPosition;
     this.calls = calls || [];
     this.ontology = ontology || [];
+    this.params = params || [];
   }
 
   toJSON() {
@@ -23,7 +24,8 @@ class SymbolEntity {
       scope: this.scope,
       startPosition: this.startPosition,
       calls: this.calls,
-      ontology: this.ontology
+      ontology: this.ontology,
+      params: this.params
     };
   }
 }

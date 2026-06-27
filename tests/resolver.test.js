@@ -106,4 +106,37 @@ describe('runDoctor', () => {
       expect(callees).not.toContain(noise);
     }
   });
+
+  test('never flags method/attribute calls (foo.bar)', () => {
+    // `b` is a global symbol in one file; a method call b.trim() elsewhere must
+    // not resolve against it.
+    const files = [
+      dfile('helpers.py', { symbols: [{ name: 'b', calls: [] }] }),
+      dfile('use.js', { symbols: [{ name: 'getBuiltins', calls: ['b.trim', 'a.join', 'line.slice'] }] }),
+    ];
+    expect(runDoctor(files, root).issues.unresolvedCalls).toEqual([]);
+  });
+
+  test('does not flag calls to function parameters (own or enclosing scope)', () => {
+    const files = [
+      dfile('util.js', {
+        symbols: [
+          { name: 'mergeJsonFile', calls: ['mutator'], params: ['file', 'mutator'] },
+          // `onData` calls `resolve`, a param declared by its enclosing scope —
+          // captured at file level via `sendRequest`'s params.
+          { name: 'sendRequest', calls: [], params: ['resolve', 'reject'] },
+          { name: 'onData', calls: ['resolve'], params: ['data'] },
+        ],
+      }),
+    ];
+    expect(runDoctor(files, root).issues.unresolvedCalls).toEqual([]);
+  });
+
+  test('flags a genuinely undefined call target', () => {
+    const files = [
+      dfile('a.js', { symbols: [{ name: 'f', calls: ['totallyUndefinedFn'], params: ['x'] }] }),
+    ];
+    const callees = runDoctor(files, root).issues.unresolvedCalls.map(c => c.callee);
+    expect(callees).toContain('totallyUndefinedFn');
+  });
 });
