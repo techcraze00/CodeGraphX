@@ -1,5 +1,6 @@
 const path = require('path');
 const { execSync } = require('child_process');
+const { resolveImport: resolveImportShared } = require('./resolver');
 
 // ── Cache for dynamic built-ins ──────────────────────────────────────────
 let cachedBuiltins = null;
@@ -60,38 +61,14 @@ function runDoctor(filesData, projectRoot) {
 
   // ── Helpers ──────────────────────────────────────────────────────────────
 
+  // Shared import resolver (handles JS "./" / "../", Python package-relative
+  // leading-dot imports, and dotted/absolute module paths). See src/resolver.js.
+  const knownFilesArr = [...knownFiles];
+
   function resolveImport(importObj, fromFile) {
     const importStr = typeof importObj === 'string' ? importObj : importObj.source;
     if (!importStr) return null;
-    const exts = ['.py', '.js', '.ts', '.jsx', '.tsx'];
-    const fromDir = path.dirname(fromFile);
-
-    if (importStr.startsWith('.')) {
-      const base = path.join(fromDir, importStr).replace(/\\/g, '/');
-      for (const ext of exts) {
-        if (knownFiles.has(base + ext)) return base + ext;
-      }
-      if (knownFiles.has(base)) return base;
-      for (const ext of exts) {
-        const idx = path.join(base, 'index').replace(/\\/g, '/') + ext;
-        if (knownFiles.has(idx)) return idx;
-      }
-      return null;
-    }
-
-    const slashed = importStr.replace(/\./g, '/');
-    for (const ext of exts) {
-      if (knownFiles.has(slashed + ext)) return slashed + ext;
-    }
-    for (const f of knownFiles) {
-      const base = f.replace(/\.[^/.]+$/, '');
-      if (base === slashed || base.endsWith('/' + slashed)) return f;
-    }
-    for (const ext of exts) {
-      const idx = slashed + '/index' + ext;
-      if (knownFiles.has(idx)) return idx;
-    }
-    return null;
+    return resolveImportShared(fromFile, importStr, knownFilesArr, projectRoot);
   }
 
   function looksLocal(importObj, fromFile) {
@@ -205,11 +182,17 @@ function runDoctor(filesData, projectRoot) {
       }
     }
 
+    const SELF_REFS = new Set(['self', 'cls', 'super', 'this']);
+
     for (const sym of f.symbols || []) {
       for (const callee of sym.calls || []) {
+        // Only treat clean identifier / dotted-name targets as resolvable calls.
+        // Guards against parser noise (string literals, subscripts, expressions).
+        if (!/^[A-Za-z_$][\w$]*(\.[A-Za-z_$][\w$]*)*$/.test(callee)) continue;
         if (builtins.has(callee)) continue;
 
         const rootPart = callee.split('.')[0];
+        if (SELF_REFS.has(rootPart)) continue;
         if (importedNames.has(rootPart) || importedNames.has(callee)) continue;
 
         const issueKey = `${sym.name}:${callee}`;

@@ -1,7 +1,10 @@
 const fs = require('fs');
 const path = require('path');
 const { parseFile } = require('../src/parser');
-const { getAdapterForFile } = require('../src/languages');
+// Reuse the globalThis-cached adapter singletons. Creating fresh adapters with
+// `new` spins up native tree-sitter 0.21 Parser instances that get corrupted
+// (empty parses) when GC'd under load from other suites — see src/languages/index.js.
+const { getAdapterForFile, ADAPTERS } = require('../src/languages');
 
 describe('CodeGraphX Parser System', () => {
   const fixturesDir = path.join(__dirname, 'fixtures');
@@ -12,8 +15,7 @@ describe('CodeGraphX Parser System', () => {
         function start() { helper(); }
         class AuthService { login() {} }
       `;
-      const JavaScriptAdapter = require('../src/languages/javascript');
-      const adapter = new JavaScriptAdapter();
+      const adapter = ADAPTERS['.js'].adapter;
       const tree = adapter.parse(contents);
       const symbols = adapter.extractSymbols(tree, contents);
       
@@ -26,8 +28,7 @@ describe('CodeGraphX Parser System', () => {
     });
 
     test('extracts symbols from fixture', () => {
-      const JavaScriptAdapter = require('../src/languages/javascript');
-      const adapter = new JavaScriptAdapter();
+      const adapter = ADAPTERS['.js'].adapter;
       const content = fs.readFileSync(path.join(fixturesDir, 'javascript/sample.js'), 'utf8');
       const tree = adapter.parse(content);
       const symbols = adapter.extractSymbols(tree, content);
@@ -42,8 +43,7 @@ describe('CodeGraphX Parser System', () => {
     });
 
     test('JavaScript adapter extracts structured imports', () => {
-      const JavaScriptAdapter = require('../src/languages/javascript/index.js');
-      const adapter = new JavaScriptAdapter();
+      const adapter = ADAPTERS['.js'].adapter;
       const code = `
         import { login as authLogin } from "@/auth/service";
         import defaultExport from "module-name";
@@ -62,8 +62,7 @@ describe('CodeGraphX Parser System', () => {
 
   describe('Python Parsing', () => {
     test('extracts symbols from fixture', () => {
-      const PythonAdapter = require('../src/languages/python');
-      const adapter = new PythonAdapter();
+      const adapter = ADAPTERS['.py'].adapter;
       const content = fs.readFileSync(path.join(fixturesDir, 'python/sample.py'), 'utf8');
       const tree = adapter.parse(content);
       const symbols = adapter.extractSymbols(tree, content);
@@ -78,8 +77,7 @@ describe('CodeGraphX Parser System', () => {
     });
 
     test('Python adapter extracts structured imports', () => {
-      const PythonAdapter = require('../src/languages/python/index.js');
-      const adapter = new PythonAdapter();
+      const adapter = ADAPTERS['.py'].adapter;
       const code = `
 from auth.service import login as authLogin
 import sys
@@ -96,8 +94,7 @@ import os as myos
 
   describe('TypeScript Parsing', () => {
     test('extracts symbols from fixture', () => {
-      const TypeScriptAdapter = require('../src/languages/typescript');
-      const adapter = new TypeScriptAdapter();
+      const adapter = ADAPTERS['.ts'].adapter;
       const content = fs.readFileSync(path.join(fixturesDir, 'typescript/sample.ts'), 'utf8');
       const tree = adapter.parse(content);
       const symbols = adapter.extractSymbols(tree, content);
@@ -114,8 +111,7 @@ import os as myos
 
   describe('CSS Parsing', () => {
     test('extracts selectors', () => {
-      const CSSAdapter = require('../src/languages/css');
-      const adapter = new CSSAdapter();
+      const adapter = ADAPTERS['.css'].adapter;
       const contents = `.btn { color: red; } #id { width: 10px; }`;
       const tree = adapter.parse(contents);
       const symbols = adapter.extractSymbols(tree, contents);
@@ -142,5 +138,14 @@ import os as myos
     expect(Array.isArray(result.imports)).toBe(true);
     expect(Array.isArray(result.declaredSymbols)).toBe(true);
     expect(Array.isArray(result.calls)).toBe(true);
+  });
+
+  test('parses files larger than the 32 KB tree-sitter default buffer', () => {
+    // node-tree-sitter's default read buffer is 32 KB; without sizing it,
+    // larger sources throw "Invalid argument". ~48 KB exercises the fix.
+    const big = 'def f_x():\n    return 1\n'.repeat(2000);
+    const result = parseFile('big.py', big);
+    expect(result.error).toBeFalsy();
+    expect(result.declaredSymbols.length).toBeGreaterThan(0);
   });
 });

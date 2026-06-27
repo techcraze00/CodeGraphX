@@ -29,7 +29,7 @@ class SymbolEntity {
 }
 
 class FileEntity {
-  constructor({ path, file, hash, language, symbols, imports, syntaxErrors, parseError }) {
+  constructor({ path, file, hash, language, symbols, imports, syntaxErrors, parseError, apiCalls, apiRoutes }) {
     this.path = path || file;
     this.file = this.path; // Compatibility alias
     this.hash = hash;
@@ -38,6 +38,8 @@ class FileEntity {
     this.imports = imports || [];
     this.syntaxErrors = syntaxErrors || [];
     this.parseError = parseError;
+    this.apiCalls = apiCalls || [];
+    this.apiRoutes = apiRoutes || [];
   }
 
   toJSON() {
@@ -49,7 +51,9 @@ class FileEntity {
       symbols: this.symbols.map(s => s.toJSON()),
       imports: this.imports,
       syntaxErrors: this.syntaxErrors,
-      parseError: this.parseError
+      parseError: this.parseError,
+      apiCalls: this.apiCalls,
+      apiRoutes: this.apiRoutes
     };
   }
 }
@@ -62,7 +66,8 @@ class EdgeEntity {
     IMPLEMENTS: 'IMPLEMENTS',
     USES: 'USES',
     REFERENCES: 'REFERENCES',
-    ROUTES_TO: 'ROUTES_TO'
+    ROUTES_TO: 'ROUTES_TO',
+    API_CALLS: 'API_CALLS'
   };
 
   constructor({ from, to, type, confidence = 1.0 }) {
@@ -205,6 +210,9 @@ function extractEntities(file, contents, projectRoot = null) {
     const { adapter } = getAdapterForFile(file);
     const rawSymbols = adapter.extractSymbols(tree, contents);
     const imports = adapter.extractImports(tree, contents);
+    const contracts = adapter.extractApiContracts
+      ? adapter.extractApiContracts(tree, contents)
+      : { apiCalls: [], apiRoutes: [] };
 
     const symbols = (rawSymbols || []).map(sym => {
       const scope = sym.scope || 'global';
@@ -218,6 +226,14 @@ function extractEntities(file, contents, projectRoot = null) {
       });
     });
 
+    // Tag route handlers so agents can spot endpoints without reading code
+    for (const route of contracts.apiRoutes || []) {
+      const handler = symbols.find(s => s.name === route.handlerName);
+      if (handler && !handler.ontology.includes('endpoint')) {
+        handler.ontology.push('endpoint', 'http');
+      }
+    }
+
     let syntaxErrors = [];
     if (tree.rootNode.hasError) {
       console.warn(`[CodeGraphX] Syntax errors in ${file}, partial parse only`);
@@ -229,7 +245,9 @@ function extractEntities(file, contents, projectRoot = null) {
       language: type,
       symbols,
       imports,
-      syntaxErrors
+      syntaxErrors,
+      apiCalls: contracts.apiCalls || [],
+      apiRoutes: contracts.apiRoutes || []
     });
   } catch (e) {
     console.warn(`[CodeGraphX] Failed to extract entities from ${file}: ${e.message}`);

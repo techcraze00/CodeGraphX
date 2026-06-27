@@ -1,0 +1,24 @@
+{
+  "description": "JavaScript: CommonJS import, internal call chain (square -> add), a class whose method calls an imported function.",
+  "extensions": [".js"],
+  "symbols": [
+    { "id": "javascript::index.js::global::Calculator", "kind": "class" },
+    { "id": "javascript::index.js::global::main", "kind": "function" },
+    { "id": "javascript::math.js::global::add", "kind": "function" },
+    { "id": "javascript::math.js::global::square", "kind": "function" }
+  ],
+  "edges": [
+    { "from": "javascript::index.js::global::Calculator", "to": "javascript::math.js::global::square", "type": "CALLS" },
+    { "from": "javascript::math.js::global::square", "to": "javascript::math.js::global::add", "type": "CALLS" },
+    { "from": "index.js", "to": "./math", "type": "IMPORTS" }
+  ],
+  "apiCalls": [],
+  "endpoints": [],
+  "impact": [
+    { "symbol": "javascript::math.js::global::square", "direction": "downstream", "depth": 5, "expected": ["add"] },
+    { "symbol": "javascript::math.js::global::add", "direction": "upstream", "depth": 5, "expected": ["square"] }
+  ],
+  "doctor": {
+    "circularImports": []
+  }
+}

@@ -10,6 +10,9 @@ function parseFile(file, contents) {
   
   try {
     const tree = adapter.parse(contents);
+    if (!tree) {
+      return { tree: null, type, error: 'File too large to parse', exports: [], imports: [], declaredSymbols: [], calls: [] };
+    }
     const declaredSymbols = adapter.extractSymbols(tree, contents) || [];
     const imports = adapter.extractImports(tree, contents) || [];
     

@@ -21,6 +21,7 @@
 |---------|---------|
 | 🧠 **Incremental Parsing** | Only re-parses changed files; O(1) cache hits for unchanged code |
 | 🔗 **Call Graph & Dependencies** | Track `calls`, `called_by`, and `imports` across your entire codebase |
+| 🌉 **Cross-Language Linking** | Connect frontend HTTP calls (`fetch`/`axios`) to backend routes (Express/Flask/FastAPI) — even across JS ↔ Python |
 | ⚡ **Bloom Filter Lookup** | O(1) symbol existence checks with configurable false-positive rate |
 | 🤖 **MCP Server Support** | Native integration with Gemini CLI, Claude Desktop, Cursor, and other MCP-compatible agents |
 | 🌐 **Interactive Dashboard** | Real-time D3.js visualization of your code graph in the browser |
@@ -141,6 +142,31 @@ CGX_PROJECT_ROOT=/path/to/your/project cgx-mcp
 ---
 
 ## 🔌 Connecting MCP to AI Agents
+
+### ⚡ One-command setup (Recommended)
+
+After installing, run a single command — no hand-editing config files, no hunting for absolute paths:
+
+```bash
+cgx setup
+```
+
+It detects the coding CLIs you have installed (Claude Code, Gemini CLI, OpenCode, Cursor), lets you multi-select which to configure, then wires each one automatically:
+
+- **MCP server** — registered via the CLI's native command (`claude mcp add`, `gemini mcp add`, …) with a JSON-config fallback. Uses an absolute Node path + the bundled `cgx-mcp`, so it works for global *and* local installs and sidesteps Gemini's PATH gotcha.
+- **Skill / instructions** — drops the CodeGraphX usage skill into each CLI's format (`~/.claude/skills/cgx/SKILL.md`, `GEMINI.md`, `AGENTS.md`, Cursor rules) so the agent knows to use cgx.
+
+```bash
+cgx setup                                  # interactive multi-select
+cgx setup --agents claude,gemini --yes     # non-interactive (CI / scripted)
+cgx setup --project                        # register for the current repo only
+```
+
+Registration is **user/global** by default, so you run it once and it works in every project — `cgx-mcp` resolves the project from the directory your CLI launches in. Existing config (other MCP servers, settings) is preserved; a `.cgx-bak` backup is written before the first edit.
+
+Then just open your coding CLI in any project and ask it to *"use cgx to explore this codebase"*.
+
+The manual per-agent instructions below remain available if you prefer to wire things up yourself.
 
 ### 💻 Claude Code (CLI)
 
@@ -340,6 +366,69 @@ codegraphx diff main feature-branch
 # - Rule-based summary (e.g., "Added function processOrder")
 # - Impact analysis ready for agent review
 ```
+
+### Cross-Language Intelligence
+
+CodeGraphX links the frontend to the backend automatically. During a scan it
+extracts the HTTP requests your client code makes and the routes your server
+exposes, then matches them into `API_CALLS` edges with a confidence score:
+
+```
+fetch('/api/users')        ──API_CALLS(0.9)──▶  app.get('/api/users', listUsers)   [Express]
+axios.post('/api/orders')  ──API_CALLS(0.9)──▶  @router.post('/api/orders')        [FastAPI]
+fetch(`/api/users/${id}`)  ──API_CALLS(0.7)──▶  @app.route('/api/users/<id>')      [Flask]
+```
+
+Supported on both sides of the stack:
+
+- **Frontend calls**: `fetch(...)` (with `method` option), `axios.get/post/...`, `axios({ url, method })`, and axios-like clients.
+- **Backend routes**: Express/`router` (`app.get`, `router.post`, …), Flask (`@app.route(..., methods=[...])`), and FastAPI (`@router.get`, `@app.post`, …).
+
+Confidence: `0.9` exact path + method, `0.75` exact path / different method,
+`0.7` parameterized path + method, `0.55` parameterized path / different method.
+Path parameters (`:id`, `{id}`, `<int:id>`) are normalized before matching, so a
+React component calling `/api/users/${id}` links to a FastAPI `/api/users/{user_id}`
+handler even though the two never reference each other directly. Route handlers
+are also tagged with an `endpoint` ontology marker, and `explain_impact` traverses
+`API_CALLS` edges — so an agent asking "what calls this backend handler?" sees the
+frontend functions across the language boundary.
+
+---
+
+## 📊 Benchmarks / Accuracy
+
+CodeGraphX is meant to be *trusted* in place of reading code, so its graph is
+measured against a hand-labeled golden corpus (`tests/golden/`) where every
+symbol, edge, cross-language API link and import cycle is known. The same
+harness gates CI (`tests/golden/accuracy.test.js`) — a parser regression fails
+the build.
+
+Latest run (curated corpus: 3 fixtures, 9 files, 20 symbols):
+
+| Category | Precision | Recall | F1 |
+|---|---|---|---|
+| Symbols | 100% | 100% | 100% |
+| Structural edges (CALLS / IMPORTS / INHERITS) | 100% | 100% | 100% |
+| Cross-language API links | 100% | 100% | 100% |
+| Endpoint tagging | 100% | 100% | 100% |
+
+| Reasoning check | Result |
+|---|---|
+| Impact tracing (exact reachable set) | 4/4 (100%) |
+| Circular-import detection (recall) | 1/1 (100%) |
+| Circular-import false positives | 0 |
+| Deterministic across re-scans | yes |
+
+Reproduce and regenerate [`BENCHMARK.md`](BENCHMARK.md) + `benchmark-results.json`:
+
+```bash
+npm run benchmark
+```
+
+> Numbers reflect the controlled golden corpus, not arbitrary real-world repos —
+> they verify extraction *correctness*, not coverage of every language construct.
+> Extend the corpus under `tests/golden/<fixture>/` with a `ground-truth.json` to
+> raise the bar.
 
 ---
 

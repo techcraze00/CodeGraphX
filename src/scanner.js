@@ -108,7 +108,18 @@ async function runScan(projectRoot, config, mcpMode = false) {
   store.saveCache();
   
   const filesData = store.getFilesData();
-  const edges = buildEdges(filesData);
+  const astEdges = buildEdges(filesData);
+
+  // Phase 6: cross-language API linking (frontend HTTP calls -> backend routes)
+  let apiEdges = [];
+  try {
+    const { linkApiContracts } = require('./cross-language-linker');
+    apiEdges = linkApiContracts(filesData);
+  } catch (e) {
+    if (!mcpMode) console.warn('[X-LANG] Could not link API contracts:', e.message);
+    else process.stderr.write(`[CodeGraphX] Cross-language link error: ${e.message}\n`);
+  }
+  const edges = astEdges.concat(apiEdges);
 
   // New logic: persist edges
   try {
@@ -128,8 +139,8 @@ async function runScan(projectRoot, config, mcpMode = false) {
           from_symbol_id: fromId,
           to_symbol_id: toId,
           type: e.type,
-          confidence: 1.0,
-          discovered_by: 'AST',
+          confidence: e.confidence ?? 1.0,
+          discovered_by: e.type === 'API_CALLS' ? 'CROSS_LANGUAGE' : 'AST',
           edge_hash: computeHash(`${fromId}-${toId}-${e.type}`),
           valid_from_commit_id: commitId
         };
@@ -260,13 +271,14 @@ Last updated: ${new Date().toISOString()}
 - Symbols: ${snapshot.files.reduce((n, f) => n + (f.symbols?.length||0), 0)}
 
 ## MCP Server
-Add to .gemini/mcp.json:
+Run \`cgx setup\` once to wire this up automatically for your coding CLI.
+Manual fallback — add to .gemini/settings.json (absolute node path avoids Gemini's PATH gotcha):
 \`\`\`json
 {
   "mcpServers": {
     "codegraphx": {
-      "command": "npx",
-      "args": ["cgx-mcp"],
+      "command": "${process.execPath}",
+      "args": ["${require('path').resolve(__dirname, '../bin/cgx-mcp')}"],
       "cwd": "${projectRoot}"
     }
   }
