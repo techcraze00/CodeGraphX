@@ -13,9 +13,11 @@ module.exports = {
   verifyHint: 'gemini, then run: /mcp list',
 
   detect() {
+    const fs = require('fs');
     const binPath = which('gemini');
-    const configDir = path.join(os.homedir(), '.gemini');
-    return { installed: !!binPath, binPath, configDir };
+    const configDir = path.join(process.env.GEMINI_CLI_HOME || os.homedir(), '.gemini');
+    const installed = !!binPath || fs.existsSync(configDir);
+    return { installed, binPath, configDir };
   },
 
   configureMcp({ nodeBin, mcpEntry, scope, cwd }) {
@@ -31,7 +33,7 @@ module.exports = {
     // File fallback. Absolute node path is the documented fix for Gemini ignoring shell PATH.
     const file = scope === 'project'
       ? path.join(cwd, '.gemini', 'settings.json')
-      : path.join(os.homedir(), '.gemini', 'settings.json');
+      : path.join(process.env.GEMINI_CLI_HOME || os.homedir(), '.gemini', 'settings.json');
     const { path: written, backedUp } = mergeJsonFile(file, (obj) => {
       obj.mcpServers = obj.mcpServers || {};
       obj.mcpServers[SERVER_NAME] = { command: nodeBin, args: [mcpEntry] };
@@ -43,7 +45,7 @@ module.exports = {
     // Gemini reads GEMINI.md context files (no skills system).
     const file = scope === 'project'
       ? path.join(cwd, 'GEMINI.md')
-      : path.join(os.homedir(), '.gemini', 'GEMINI.md');
+      : path.join(process.env.GEMINI_CLI_HOME || os.homedir(), '.gemini', 'GEMINI.md');
     const { path: written } = upsertMarkdownBlock(file);
     return { ok: true, path: written };
   },

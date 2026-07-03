@@ -13,9 +13,11 @@ module.exports = {
   verifyHint: 'claude mcp list',
 
   detect() {
+    const fs = require('fs');
     const binPath = which('claude');
-    const configDir = path.join(os.homedir(), '.claude');
-    return { installed: !!binPath, binPath, configDir };
+    const configDir = process.env.CLAUDE_CONFIG_DIR || path.join(os.homedir(), '.claude');
+    const installed = !!binPath || fs.existsSync(configDir);
+    return { installed, binPath, configDir };
   },
 
   configureMcp({ nodeBin, mcpEntry, scope, cwd }) {
@@ -42,7 +44,8 @@ module.exports = {
 
   installSkill() {
     // Skills are user-scoped in Claude Code.
-    const dest = path.join(os.homedir(), '.claude', 'skills', 'cgx', 'SKILL.md');
+    const configDir = process.env.CLAUDE_CONFIG_DIR || path.join(os.homedir(), '.claude');
+    const dest = path.join(configDir, 'skills', 'cgx', 'SKILL.md');
     const written = copySkillFile(dest);
     return { ok: true, path: written };
   },

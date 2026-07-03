@@ -19,15 +19,17 @@ module.exports = {
   verifyHint: 'agy, then run: /mcp',
 
   detect() {
+    const fs = require('fs');
     const binPath = which('agy');
-    const configDir = path.join(os.homedir(), '.gemini');
-    return { installed: !!binPath, binPath, configDir };
+    const configDir = path.join(process.env.GEMINI_CLI_HOME || os.homedir(), '.gemini');
+    const installed = !!binPath || fs.existsSync(configDir);
+    return { installed, binPath, configDir };
   },
 
   configureMcp({ nodeBin, mcpEntry, scope, cwd }) {
     const file = scope === 'project'
       ? path.join(cwd, '.agents', 'mcp_config.json')
-      : path.join(os.homedir(), '.gemini', 'config', 'mcp_config.json');
+      : path.join(process.env.GEMINI_CLI_HOME || os.homedir(), '.gemini', 'config', 'mcp_config.json');
     const { path: written, backedUp } = mergeJsonFile(file, (obj) => {
       obj.mcpServers = obj.mcpServers || {};
       obj.mcpServers[SERVER_NAME] = { command: nodeBin, args: [mcpEntry] };
@@ -38,7 +40,7 @@ module.exports = {
   installSkill({ scope, cwd }) {
     const dest = scope === 'project'
       ? path.join(cwd, '.agents', 'skills', 'cgx', 'SKILL.md')
-      : path.join(os.homedir(), '.gemini', 'skills', 'cgx', 'SKILL.md');
+      : path.join(process.env.GEMINI_CLI_HOME || os.homedir(), '.gemini', 'skills', 'cgx', 'SKILL.md');
     const written = copySkillFile(dest);
     return { ok: true, path: written };
   },

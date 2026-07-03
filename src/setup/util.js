@@ -3,7 +3,7 @@
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
-const { spawnSync } = require('child_process');
+const cp = require('child_process');
 
 /** Absolute path to the bundled cgx skill source. */
 const SKILL_SRC = path.resolve(__dirname, '../../skills/cgx/SKILL.md');
@@ -26,18 +26,35 @@ function ensureDir(dir) {
  * Returns the resolved path string, or null if not found.
  */
 function which(bin) {
-  const probe = process.platform === 'win32' ? 'where' : 'command';
-  const args = process.platform === 'win32' ? [bin] : ['-v', bin];
-  try {
-    const res = spawnSync(probe, args, { encoding: 'utf8', shell: process.platform === 'win32' });
-    if (res.status === 0 && res.stdout) {
-      return res.stdout.split(/\r?\n/).map((s) => s.trim()).filter(Boolean)[0] || null;
-    }
-  } catch (_) {
-    /* ignore */
+  if (process.platform === 'win32') {
+    try {
+      const res = cp.spawnSync('where', [bin], { encoding: 'utf8' });
+      if (res.status === 0 && res.stdout) {
+        return res.stdout.split(/\r?\n/).map((s) => s.trim()).filter(Boolean)[0] || null;
+      }
+    } catch (_) {}
+  } else {
+    // 1. Try standard 'which' command first (binary, fast, no shell overhead)
+    try {
+      const res = cp.spawnSync('which', [bin], { encoding: 'utf8' });
+      if (res.status === 0 && res.stdout) {
+        const p = res.stdout.trim();
+        if (p) return p;
+      }
+    } catch (_) {}
+
+    // 2. Fallback to shell builtin 'command -v' (spawns shell, highly compatible)
+    try {
+      const res = cp.spawnSync('command', ['-v', bin], { encoding: 'utf8', shell: true });
+      if (res.status === 0 && res.stdout) {
+        const p = res.stdout.trim();
+        if (p) return p;
+      }
+    } catch (_) {}
   }
   return null;
 }
+
 
 /**
  * Run a CLI command, capturing output. Never throws.
@@ -45,7 +62,7 @@ function which(bin) {
  */
 function runCli(cmd, args, opts = {}) {
   try {
-    const res = spawnSync(cmd, args, { encoding: 'utf8', timeout: 30000, ...opts });
+    const res = cp.spawnSync(cmd, args, { encoding: 'utf8', timeout: 30000, ...opts });
     return {
       ok: res.status === 0,
       status: res.status,

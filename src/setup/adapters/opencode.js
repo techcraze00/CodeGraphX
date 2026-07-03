@@ -18,8 +18,11 @@ module.exports = {
   verifyHint: 'opencode mcp list',
 
   detect() {
+    const fs = require('fs');
     const binPath = which('opencode');
-    return { installed: !!binPath, binPath, configDir: configDir() };
+    const dir = configDir();
+    const installed = !!binPath || fs.existsSync(dir);
+    return { installed, binPath, configDir: dir };
   },
 
   configureMcp({ nodeBin, mcpEntry, scope, cwd }) {
