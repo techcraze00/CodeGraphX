@@ -1,0 +1,4 @@
+User-agent: *
+Allow: /
+
+Sitemap: https://techcraze00.github.io/CodeGraphX/sitemap.xml

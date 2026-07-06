@@ -8,16 +8,27 @@
     "benchmark": "node scripts/benchmark.js"
   },
   "keywords": [
+    "codegraphx",
+    "cgx",
     "mcp",
     "model-context-protocol",
+    "mcp-server",
     "code-graph",
+    "codebase-graph",
+    "code-intelligence",
     "code-analysis",
+    "static-analysis",
     "tree-sitter",
     "ast",
     "ai-agents",
+    "ai-coding-assistant",
+    "llm-tools",
     "claude",
+    "claude-code",
     "gemini",
+    "gemini-cli",
     "impact-analysis",
+    "blast-radius",
     "dependency-graph",
     "sqlite"
   ],
@@ -27,7 +38,7 @@
     "type": "git",
     "url": "git+https://github.com/techcraze00/CodeGraphX.git"
   },
-  "homepage": "https://github.com/techcraze00/CodeGraphX#readme",
+  "homepage": "https://techcraze00.github.io/CodeGraphX/",
   "bugs": {
     "url": "https://github.com/techcraze00/CodeGraphX/issues"
   },

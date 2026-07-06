@@ -1,7 +1,7 @@
-# CodeGraphX
+# CodeGraphX (CGX)
 
 <p align="center">
-  <img src="assets/logo.png" alt="CodeGraphX Banner" width="30%" border-radius="50%" />
+  <img src="assets/logo.png" alt="CodeGraphX (CGX) logo — codebase graph engine and MCP server for AI coding agents" width="30%" border-radius="50%" />
 </p>
 
 <p align="center">
@@ -10,7 +10,10 @@
   <a href="LICENSE"><img src="https://img.shields.io/npm/l/codegraphx.svg" alt="license" /></a>
   <a href="https://nodejs.org"><img src="https://img.shields.io/badge/node-%3E%3D18-blue.svg" alt="node version" /></a>
   <a href="https://modelcontextprotocol.io"><img src="https://img.shields.io/badge/MCP-server-8A2BE2.svg" alt="MCP server" /></a>
+  <a href="https://techcraze00.github.io/CodeGraphX/"><img src="https://img.shields.io/badge/docs-website-2563eb.svg" alt="website" /></a>
 </p>
+
+<p align="center"><strong>Website:</strong> <a href="https://techcraze00.github.io/CodeGraphX/">techcraze00.github.io/CodeGraphX</a> · <strong>npm:</strong> <a href="https://www.npmjs.com/package/codegraphx"><code>codegraphx</code></a></p>
 
 > **CodeGraphX (CGX)** is a local, token-efficient **codebase graph engine** for AI coding agents and human developers. It parses your source with Tree-sitter, stores a bi-temporal semantic graph in SQLite, and serves it over a **CLI** and an **MCP server** — so an agent can ask *"what breaks if I change this function?"* and get an exact answer in a few hundred tokens instead of reading 50 files.
 
@@ -446,6 +449,7 @@ MIT © 2026 Prayas Jadhav. See [LICENSE](LICENSE).
 
 ## Links
 
+- **Website / docs:** [techcraze00.github.io/CodeGraphX](https://techcraze00.github.io/CodeGraphX/)
 - **Package:** [`codegraphx` on npm](https://www.npmjs.com/package/codegraphx)
 - **Repository:** [github.com/techcraze00/CodeGraphX](https://github.com/techcraze00/CodeGraphX)
 - **Issues:** [github.com/techcraze00/CodeGraphX/issues](https://github.com/techcraze00/CodeGraphX/issues)

@@ -1,0 +1,236 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+
+  <!-- Primary SEO -->
+  <title>CodeGraphX (CGX) — Codebase Graph Engine &amp; MCP Server for AI Coding Agents</title>
+  <meta name="description" content="CodeGraphX (CGX) is a local, token-efficient codebase graph engine and MCP server for AI coding agents. Tree-sitter parsing, a bi-temporal SQLite semantic graph, O(1) symbol lookup, and impact/blast-radius tracing so agents answer 'what breaks if I change this?' in a few hundred tokens." />
+  <meta name="keywords" content="cgx, codegraphx, codebase graph, code graph engine, mcp server, model context protocol, ai coding agents, impact analysis, blast radius, dependency graph, tree-sitter, code intelligence, static analysis, claude code, gemini cli" />
+  <meta name="author" content="Prayas Jadhav" />
+  <link rel="canonical" href="https://techcraze00.github.io/CodeGraphX/" />
+  <meta name="robots" content="index, follow" />
+
+  <!-- Open Graph -->
+  <meta property="og:type" content="website" />
+  <meta property="og:site_name" content="CodeGraphX (CGX)" />
+  <meta property="og:title" content="CodeGraphX (CGX) — Codebase Graph Engine &amp; MCP Server for AI Agents" />
+  <meta property="og:description" content="A local, token-efficient codebase graph engine for AI coding agents. Impact tracing, O(1) symbol lookup, and cross-language API links over a CLI and an MCP server." />
+  <meta property="og:url" content="https://techcraze00.github.io/CodeGraphX/" />
+  <meta property="og:image" content="https://techcraze00.github.io/CodeGraphX/og.png" />
+  <meta property="og:image:width" content="1200" />
+  <meta property="og:image:height" content="400" />
+
+  <!-- Twitter -->
+  <meta name="twitter:card" content="summary_large_image" />
+  <meta name="twitter:title" content="CodeGraphX (CGX) — Codebase Graph Engine &amp; MCP Server for AI Agents" />
+  <meta name="twitter:description" content="A local, token-efficient codebase graph engine for AI coding agents. Impact tracing, O(1) symbol lookup, cross-language API links, CLI + MCP server." />
+  <meta name="twitter:image" content="https://techcraze00.github.io/CodeGraphX/og.png" />
+
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='90'%3E%F0%9F%95%B8%EF%B8%8F%3C/text%3E%3C/svg%3E" />
+
+  <!-- Structured data: SoftwareApplication -->
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@type": "SoftwareApplication",
+    "name": "CodeGraphX",
+    "alternateName": "CGX",
+    "applicationCategory": "DeveloperApplication",
+    "operatingSystem": "macOS, Linux, Windows (Node.js >= 18)",
+    "description": "CodeGraphX (CGX) is a local, token-efficient codebase graph engine and MCP server for AI coding agents. It parses source with Tree-sitter, stores a bi-temporal semantic graph in SQLite, and answers structural impact/blast-radius questions in a few hundred tokens.",
+    "url": "https://techcraze00.github.io/CodeGraphX/",
+    "downloadUrl": "https://www.npmjs.com/package/codegraphx",
+    "codeRepository": "https://github.com/techcraze00/CodeGraphX",
+    "license": "https://opensource.org/licenses/MIT",
+    "softwareVersion": "1.2.4",
+    "author": { "@type": "Person", "name": "Prayas Jadhav" },
+    "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" },
+    "keywords": "cgx, codegraphx, codebase graph, mcp server, ai coding agents, impact analysis, tree-sitter, dependency graph, code intelligence"
+  }
+  </script>
+
+  <!-- Structured data: FAQ -->
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@type": "FAQPage",
+    "mainEntity": [
+      {
+        "@type": "Question",
+        "name": "What is CodeGraphX (CGX)?",
+        "acceptedAnswer": { "@type": "Answer", "text": "CodeGraphX (CGX) is a local, token-efficient codebase graph engine for AI coding agents and developers. It parses source with Tree-sitter, stores a bi-temporal semantic graph in SQLite, and serves it over a CLI and an MCP server so an agent can ask 'what breaks if I change this function?' and get an exact answer in a few hundred tokens." }
+      },
+      {
+        "@type": "Question",
+        "name": "Is CGX free and does it send my code anywhere?",
+        "acceptedAnswer": { "@type": "Answer", "text": "Yes, CGX is free and MIT-licensed. It runs 100% locally with no network, no telemetry, and no cloud sync. Code is parsed, never executed, and CGX never modifies your source." }
+      },
+      {
+        "@type": "Question",
+        "name": "How does CGX save AI agent tokens?",
+        "acceptedAnswer": { "@type": "Answer", "text": "Instead of grepping and re-reading dozens of files, an agent runs one targeted graph query (for example explain_impact) that returns a small TOON-encoded answer. TOON removes the repeated keys and braces that dominate JSON token counts." }
+      },
+      {
+        "@type": "Question",
+        "name": "How do I install CodeGraphX?",
+        "acceptedAnswer": { "@type": "Answer", "text": "Install from npm with 'npm install -g codegraphx', then run 'cgx setup' to wire the MCP server into your coding CLIs (Claude Code, Gemini CLI, and more), and 'cgx init' to index your codebase." }
+      }
+    ]
+  }
+  </script>
+
+  <style>
+    :root {
+      --bg: #ffffff; --fg: #1a1a2e; --muted: #5b5b74; --card: #f6f6fb;
+      --border: #e4e4ef; --accent: #7c3aed; --accent2: #2563eb; --code: #0f172a; --codefg: #e2e8f0;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root { --bg: #0d0d14; --fg: #e8e8f0; --muted: #9a9ab0; --card: #161622;
+        --border: #262636; --accent: #a78bfa; --accent2: #60a5fa; --code: #0a0a12; --codefg: #e2e8f0; }
+    }
+    :root[data-theme="light"] { --bg:#fff; --fg:#1a1a2e; --muted:#5b5b74; --card:#f6f6fb; --border:#e4e4ef; --accent:#7c3aed; --accent2:#2563eb; --code:#0f172a; --codefg:#e2e8f0; }
+    :root[data-theme="dark"] { --bg:#0d0d14; --fg:#e8e8f0; --muted:#9a9ab0; --card:#161622; --border:#262636; --accent:#a78bfa; --accent2:#60a5fa; --code:#0a0a12; --codefg:#e2e8f0; }
+    * { box-sizing: border-box; }
+    body { margin: 0; background: var(--bg); color: var(--fg); font: 16px/1.65 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; -webkit-font-smoothing: antialiased; }
+    a { color: var(--accent2); text-decoration: none; }
+    a:hover { text-decoration: underline; }
+    .wrap { max-width: 900px; margin: 0 auto; padding: 0 20px; }
+    header { text-align: center; padding: 64px 20px 40px; }
+    header img { max-width: 100%; width: 520px; height: auto; }
+    h1 { font-size: 2.1rem; margin: 22px 0 8px; letter-spacing: -0.02em; }
+    .tag { color: var(--muted); font-size: 1.15rem; max-width: 640px; margin: 0 auto 24px; }
+    .badges { display: flex; gap: 8px; flex-wrap: wrap; justify-content: center; margin-bottom: 24px; }
+    .badges img { height: 20px; }
+    .cta { display: inline-flex; gap: 8px; align-items: center; background: var(--accent); color: #fff; padding: 11px 22px; border-radius: 8px; font-weight: 600; margin: 6px; }
+    .cta.alt { background: transparent; color: var(--fg); border: 1px solid var(--border); }
+    .cta:hover { text-decoration: none; opacity: .92; }
+    section { padding: 34px 0; border-top: 1px solid var(--border); }
+    h2 { font-size: 1.5rem; margin: 0 0 14px; letter-spacing: -0.01em; }
+    h3 { font-size: 1.05rem; margin: 20px 0 4px; }
+    p { color: var(--fg); }
+    .muted { color: var(--muted); }
+    pre { background: var(--code); color: var(--codefg); padding: 16px; border-radius: 10px; overflow-x: auto; font-size: 13.5px; line-height: 1.5; }
+    code { font-family: "SF Mono", Menlo, Consolas, monospace; }
+    p code, li code { background: var(--card); border: 1px solid var(--border); padding: 1px 5px; border-radius: 5px; font-size: 0.9em; }
+    .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 14px; margin-top: 8px; }
+    .feat { background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 16px 18px; }
+    .feat h3 { margin-top: 0; }
+    .feat p { color: var(--muted); font-size: 0.94rem; margin: 4px 0 0; }
+    .tblwrap { overflow-x: auto; }
+    table { border-collapse: collapse; width: 100%; font-size: 0.92rem; }
+    th, td { text-align: left; padding: 9px 12px; border-bottom: 1px solid var(--border); vertical-align: top; }
+    th { color: var(--muted); font-weight: 600; }
+    details { border: 1px solid var(--border); border-radius: 10px; padding: 4px 16px; margin: 10px 0; background: var(--card); }
+    summary { cursor: pointer; font-weight: 600; padding: 10px 0; }
+    footer { text-align: center; color: var(--muted); padding: 40px 20px 60px; border-top: 1px solid var(--border); font-size: 0.9rem; }
+    .kw { color: var(--muted); font-size: 0.82rem; text-align: center; padding-top: 8px; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <header>
+      <img src="og.png" alt="CodeGraphX (CGX) — codebase graph engine for AI coding agents" />
+      <h1>CodeGraphX <span class="muted">(CGX)</span></h1>
+      <p class="tag">A local, token-efficient <strong>codebase graph engine</strong> and <strong>MCP server</strong> for AI coding agents. Ask <em>"what breaks if I change this function?"</em> — get an exact answer in a few hundred tokens instead of reading 50 files.</p>
+      <div class="badges">
+        <a href="https://www.npmjs.com/package/codegraphx"><img src="https://img.shields.io/npm/v/codegraphx.svg" alt="npm version" /></a>
+        <a href="https://www.npmjs.com/package/codegraphx"><img src="https://img.shields.io/npm/dm/codegraphx.svg" alt="npm downloads" /></a>
+        <a href="https://github.com/techcraze00/CodeGraphX/blob/main/LICENSE"><img src="https://img.shields.io/npm/l/codegraphx.svg" alt="MIT license" /></a>
+      </div>
+      <div>
+        <a class="cta" href="https://github.com/techcraze00/CodeGraphX">⭐ View on GitHub</a>
+        <a class="cta alt" href="https://www.npmjs.com/package/codegraphx">📦 Install from npm</a>
+      </div>
+    </header>
+
+    <section>
+      <h2>What is CodeGraphX?</h2>
+      <p><strong>CodeGraphX (CGX)</strong> is a <em>code intelligence layer</em>: a persistent, queryable graph of your codebase's symbols (functions, classes, variables), their relationships (<code>calls</code>, <code>called_by</code>, <code>imports</code>, <code>inherits</code>, cross-language <code>API_CALLS</code>), and how they change over time.</p>
+      <p>It sits in the same family as a Language Server (LSP) or a code-search index, but it is purpose-built for <strong>LLM agents</strong>:</p>
+      <ul>
+        <li>A <strong>Language Server</strong> answers "go to definition" for an editor, one symbol at a time.</li>
+        <li>A <strong>grep / embedding search</strong> finds text, not structure.</li>
+        <li><strong>CodeGraphX</strong> answers <em>structural, whole-repo reasoning questions</em> — impact / blast-radius, dependency cycles, cross-language contracts, "does this symbol even exist?" — and serializes the answer in a <strong>token-optimized</strong> form an agent drops straight into context.</li>
+      </ul>
+      <p class="muted">The core problem it solves: AI coding agents burn most of their token budget <em>re-discovering</em> a codebase — opening files, scrolling, grepping, re-reading the same modules every session. CGX indexes once and answers those questions from a graph, so the agent spends tokens <em>reasoning</em> instead of <em>scanning</em>.</p>
+    </section>
+
+    <section>
+      <h2>Quick start</h2>
+      <pre><code># Install globally
+npm install -g codegraphx
+
+# Wire the MCP server + skill into your coding CLIs (Claude Code, Gemini CLI, …)
+cgx setup
+
+# Index your codebase (generates .codegraphx/ artifacts + .codegraphx.db)
+cgx init
+
+# Ask what breaks if you change a symbol
+cgx impact validateInput --direction downstream --depth 5</code></pre>
+      <p class="muted">Requires Node.js ≥ 18. Everything runs locally — no account, no network, no telemetry.</p>
+    </section>
+
+    <section>
+      <h2>Features</h2>
+      <div class="grid">
+        <div class="feat"><h3>🧠 Symbol graph</h3><p>Every function/class/method with <code>calls</code>, <code>called_by</code>, <code>imports</code>, <code>inherits</code> edges.</p></div>
+        <div class="feat"><h3>⚡ O(1) symbol lookup</h3><p>A Bloom filter answers <code>probable_yes</code> / <code>definite_no</code> without touching the DB.</p></div>
+        <div class="feat"><h3>💥 Impact tracing</h3><p>Recursive upstream (callers) / downstream (callees) blast-radius via a SQL CTE.</p></div>
+        <div class="feat"><h3>🌐 Cross-language links</h3><p>Matches frontend <code>fetch</code>/<code>axios</code> calls to Express / Flask / FastAPI routes as confidence-scored <code>API_CALLS</code> edges.</p></div>
+        <div class="feat"><h3>🕑 Bi-temporal history</h3><p>Append-only graph — every symbol and edge is versioned by commit, so you can query the codebase as of any point in time.</p></div>
+        <div class="feat"><h3>🔌 MCP server</h3><p>Exposes the graph to Claude Code, Gemini CLI, Cursor, and any Model Context Protocol client.</p></div>
+      </div>
+    </section>
+
+    <section>
+      <h2>Why it saves tokens</h2>
+      <p>Every agent action has a token cost. Consider: <strong>"What will break if I change <code>validateInput</code>?"</strong></p>
+      <div class="tblwrap">
+      <table>
+        <thead><tr><th>Approach</th><th>What the agent does</th><th>Rough context cost</th></tr></thead>
+        <tbody>
+          <tr><td><strong>Without CGX</strong></td><td>Greps for <code>validateInput</code>, opens ~15–50 candidate files, reads each to trace call sites</td><td><strong>tens of thousands</strong> of tokens</td></tr>
+          <tr><td><strong>With CGX</strong></td><td><code>explain_impact({ symbol_name: "validateInput" })</code> → one small answer of upstream callers + downstream callees</td><td><strong>a few hundred</strong> tokens</td></tr>
+        </tbody>
+      </table>
+      </div>
+      <p class="muted">CGX serializes its graph in <strong>TOON</strong> (Token-Oriented Object Notation) — a compact tabular encoding that removes the repeated keys and braces that dominate JSON token counts.</p>
+    </section>
+
+    <section>
+      <h2>MCP tools for AI agents</h2>
+      <div class="tblwrap">
+      <table>
+        <tbody>
+          <tr><td><code>get_graph_status</code></td><td>Check whether a scan has been run.</td></tr>
+          <tr><td><code>list_files</code></td><td>List indexed files, with an optional substring filter.</td></tr>
+          <tr><td><code>check_symbol_exists</code></td><td>O(1) Bloom-filter lookup — <code>probable_yes</code> or <code>definite_no</code>.</td></tr>
+          <tr><td><code>explain_impact</code></td><td>Upstream (who uses this) + downstream (what this breaks) for a symbol.</td></tr>
+          <tr><td><code>verify_task</code></td><td>Given a task + commit hash, returns status, changes, and untested additions.</td></tr>
+          <tr><td><code>get_session_diff</code></td><td>Structural summary of changes vs HEAD / branch.</td></tr>
+        </tbody>
+      </table>
+      </div>
+    </section>
+
+    <section>
+      <h2>FAQ</h2>
+      <details><summary>What is CGX short for?</summary><p>CGX is the short name for <strong>CodeGraphX</strong>, a codebase graph engine and MCP server for AI coding agents.</p></details>
+      <details><summary>Is my code sent anywhere?</summary><p>No. CGX is 100% local — no network, no telemetry, no cloud sync. Code is parsed, never executed, and CGX never modifies your source.</p></details>
+      <details><summary>Does it work on large codebases?</summary><p>Yes. Incremental parsing means unchanged files are served from cache; only changed files are re-parsed.</p></details>
+      <details><summary>Which languages are supported?</summary><p>Python, JavaScript, TypeScript, JSX/TSX, HTML, and CSS via Tree-sitter adapters. Cross-language API links cover React ⇄ Express / Flask / FastAPI.</p></details>
+      <details><summary>Which AI agents can use it?</summary><p>Any Model Context Protocol client — including Claude Code, Gemini CLI, Cursor, OpenCode, and Antigravity. Run <code>cgx setup</code> to wire them automatically.</p></details>
+    </section>
+
+    <footer>
+      <p><a href="https://github.com/techcraze00/CodeGraphX">GitHub</a> · <a href="https://www.npmjs.com/package/codegraphx">npm</a> · <a href="https://github.com/techcraze00/CodeGraphX/issues">Issues</a></p>
+      <p><strong>CodeGraphX (CGX)</strong> — Understand your codebase. Instantly. Built for developers and AI agents alike.</p>
+      <p class="muted">MIT © 2026 Prayas Jadhav</p>
+      <p class="kw">codegraphx · cgx · codebase graph engine · mcp server for ai agents · code impact analysis · dependency graph · tree-sitter code intelligence · blast radius analysis</p>
+    </footer>
+  </div>
+</body>
+</html>
