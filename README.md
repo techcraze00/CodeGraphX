@@ -9,401 +9,331 @@
   <a href="https://www.npmjs.com/package/codegraphx"><img src="https://img.shields.io/npm/dm/codegraphx.svg" alt="npm downloads" /></a>
   <a href="LICENSE"><img src="https://img.shields.io/npm/l/codegraphx.svg" alt="license" /></a>
   <a href="https://nodejs.org"><img src="https://img.shields.io/badge/node-%3E%3D18-blue.svg" alt="node version" /></a>
+  <a href="https://modelcontextprotocol.io"><img src="https://img.shields.io/badge/MCP-server-8A2BE2.svg" alt="MCP server" /></a>
 </p>
 
-> **CodeGraphX** is a local, token-efficient codebase graphing system designed for AI coding agents and human developers. It uses Tree-sitter to parse code incrementally, builds a dependency graph, and exposes it via CLI or MCP server — eliminating costly file-scanning loops and enabling instant symbol lookup.
+> **CodeGraphX (CGX)** is a local, token-efficient **codebase graph engine** for AI coding agents and human developers. It parses your source with Tree-sitter, stores a bi-temporal semantic graph in SQLite, and serves it over a **CLI** and an **MCP server** — so an agent can ask *"what breaks if I change this function?"* and get an exact answer in a few hundred tokens instead of reading 50 files.
 
 ---
 
-## ✨ Key Features
+## What is CodeGraphX?
 
-| Feature | Benefit |
-|---------|---------|
-| 🧠 **Incremental Parsing** | Only re-parses changed files; O(1) cache hits for unchanged code |
-| 🔗 **Call Graph & Dependencies** | Track `calls`, `called_by`, and `imports` across your entire codebase |
-| 🌉 **Cross-Language Linking** | Connect frontend HTTP calls (`fetch`/`axios`) to backend routes (Express/Flask/FastAPI) — even across JS ↔ Python |
-| ⚡ **Bloom Filter Lookup** | O(1) symbol existence checks with configurable false-positive rate |
-| 🤖 **MCP Server Support** | Native integration with Gemini CLI, Claude Desktop, Cursor, and other MCP-compatible agents |
-| 🌐 **Interactive Dashboard** | Real-time D3.js visualization of your code graph in the browser |
-| 🔐 **100% Local** | No cloud, no telemetry, no data leaves your machine |
-| 📦 **TOON Output Format** | Token-optimized serialization for efficient agent context injection |
-| 🛠️ **Multi-Language** | Python, JavaScript, TypeScript, JSX, TSX, HTML, CSS (expandable) |
+**Definition —** CodeGraphX is a *code intelligence layer*: a persistent, queryable graph of your codebase's symbols (functions, classes, variables), their relationships (`calls`, `called_by`, `imports`, `inherits`, cross-language `API_CALLS`), and how they change over time.
+
+**What kind of tool is it?** It sits in the same family as a Language Server (LSP) or a code-search index, but it is purpose-built for **LLM agents**:
+
+- A **Language Server** answers "go to definition" for an editor, one symbol at a time.
+- A **grep / embedding search** finds text, not structure.
+- **CodeGraphX** answers *structural, whole-repo reasoning questions* — impact/blast-radius, dependency cycles, cross-language contracts, "does this symbol even exist?" — and serializes the answer in a **token-optimized** form an agent can drop straight into its context.
+
+**The core problem it solves —** AI coding agents burn most of their token budget *re-discovering* a codebase: opening files, scrolling, grepping, re-reading the same modules every session. CodeGraphX indexes once and answers those questions from a graph, so the agent spends tokens *reasoning* instead of *scanning*.
 
 ---
 
-## 🚀 Installation
+## Why it's useful (the token economics)
 
-### Global Installation (Recommended)
+Every agent action has a token cost. Consider a common question: **"What will break if I change `validateInput`?"**
+
+| Approach | What the agent does | Rough context cost |
+|---|---|---|
+| **No CGX** | Greps for `validateInput`, opens ~15–50 candidate files, reads each to trace call sites | **tens of thousands** of tokens, several tool round-trips |
+| **With CGX** | `explain_impact({ symbol_name: "validateInput" })` → one small JSON of upstream callers + downstream callees | **a few hundred** tokens, one round-trip |
+
+The savings compound because CGX serializes its graph in **TOON** (Token-Oriented Object Notation) instead of JSON — a compact tabular encoding that removes the repeated keys and braces that dominate JSON token counts.
+
+> **Honest framing:** the accuracy numbers below are measured against a hand-labeled corpus. The token figures above are an *illustrative model* of typical agent behavior, not a lab benchmark — the exact ratio depends on your repo and agent. The mechanism (one targeted graph query vs. many file reads) is what delivers the win.
+
+**Where CGX pays off most:**
+- Large / unfamiliar repos where "read everything" is infeasible.
+- Long agent sessions (the graph is a cache the agent doesn't have to rebuild).
+- Cross-language stacks (React ⇄ Express/Flask/FastAPI) where call graphs don't span files.
+- Refactors and reviews, where blast-radius and dead/broken-import detection matter.
+
+---
+
+## Full capabilities
+
+| Capability | What it gives you |
+|---|---|
+| 🧠 **Symbol graph** | Every function/class/method with `calls`, `called_by`, `imports`, `inherits` edges |
+| ⚡ **O(1) symbol lookup** | Bloom filter answers `probable_yes` / `definite_no` without touching the DB |
+| 💥 **Impact tracing** | Recursive upstream (callers) / downstream (callees) blast-radius via a SQL CTE |
+| 🌉 **Cross-language linking** | Matches frontend `fetch`/`axios` calls to backend routes as confidence-scored `API_CALLS` edges |
+| 🕑 **Bi-temporal history** | Append-only graph — query the codebase *as of any commit*; nothing is ever destroyed |
+| 🩺 **Doctor diagnostics** | Reports missing/unresolvable imports, unresolved call targets, circular dependencies, syntax errors |
+| ✅ **Task verification** | Compares a task description against a commit's actual symbol changes; flags untested additions |
+| 🔀 **Session / branch diff** | Structural summary of added/removed/modified symbols vs. HEAD or a branch |
+| 🌐 **Interactive dashboard** | D3.js force graph of the whole codebase in the browser |
+| 📦 **TOON artifacts** | Token-optimized graph + file-index exports for agent context injection |
+| 🔐 **100% local** | No cloud, no telemetry, no network — code never leaves the machine |
+| 🤖 **MCP server** | 6 tools exposed to any MCP-compatible agent, with zero-config auto-indexing |
+
+---
+
+## Tech used in this project
+
+| Layer | Technology |
+|---|---|
+| **Parsing** | [Tree-sitter](https://tree-sitter.github.io/) with per-language grammars (`tree-sitter-python`, `-javascript`, `-typescript`, `-html`, `-css`) |
+| **Storage** | SQLite via [`better-sqlite3`](https://github.com/WiseLibs/better-sqlite3) (default) or **Postgres** (`pg`), through the [Kysely](https://kysely.dev/) type-safe query builder |
+| **Agent protocol** | [Model Context Protocol SDK](https://modelcontextprotocol.io/) (`@modelcontextprotocol/sdk`) over stdio |
+| **Probabilistic lookup** | [`bloom-filters`](https://github.com/Callidon/bloom-filters) |
+| **Token-optimized output** | [TOON](https://github.com/toon-format/toon) (`@toon-format/toon`) |
+| **CLI** | [Commander](https://github.com/tj/commander.js) + [`@clack/prompts`](https://github.com/natemoo-re/clack) for the interactive setup |
+| **File watching** | [chokidar](https://github.com/paulmillr/chokidar) |
+| **Runtime** | Node.js ≥ 18, CommonJS |
+
+---
+
+## Supported languages
+
+| Language | Extensions | Extracts |
+|---|---|---|
+| Python | `.py` | functions, classes, calls, imports (incl. package-relative `.` / `..`), Flask/FastAPI routes |
+| JavaScript | `.js`, `.jsx` | functions, classes, arrow fns, calls, imports/`require`, local bindings, `fetch`/`axios` calls, Express routes |
+| TypeScript | `.ts`, `.tsx` | same as JS plus TS-specific declarations |
+| HTML | `.html` | elements / structural symbols |
+| CSS | `.css` | selectors (classes, ids) |
+
+---
+
+## Installation
 
 ```bash
+# Global (recommended)
 npm install -g codegraphx
-```
 
-### Project-Local Installation
-
-```bash
+# Or per-project
 npm install --save-dev codegraphx
+
+# Verify
+codegraphx --version        # 1.2.4
 ```
 
-### Verify Installation
-
-```bash
-codegraphx --version
-# Output: 1.1.0
-```
+The CLI is available as `codegraphx`, `cgx`, and the MCP entrypoint `cgx-mcp`.
 
 ---
 
-## 📦 Quick Start
-
-### Step 1: Initialize Your Code Graph
+## Quick start
 
 ```bash
 cd your-project
-codegraphx scan
+
+# 1. Index the codebase → writes .codegraphx/ + .codegraphx.db
+cgx init
+
+# 2. Ask questions
+cgx query authenticateUser                       # where is it, what calls it, what it calls
+cgx impact authenticateUser --direction downstream --depth 5
+cgx impact authenticateUser --direction upstream
+cgx stats                                        # files / symbols / edges
+cgx doctor                                       # health report
+
+# 3. Optional live view
+cgx watch                                        # re-index on file change
+cgx dashboard                                    # open the D3 graph in a browser
 ```
 
-This creates a `.codegraphx/` directory containing:
-- `codebase.json` — Full symbol/edge graph
-- `symbols.bloom` — Bloom filter for O(1) symbol checks
-- `cache.json` — Incremental parsing cache
-- `codegraph.html` — Interactive dashboard (optional)
+> **Re-scanning is a full rewrite.** Each `cgx init` / `cgx scan` rebuilds `.codegraphx/` from scratch: files deleted from disk are evicted from the graph, stale artifacts are wiped, and the database temporal-closes removed symbols — so the graph always matches your working tree. Unchanged files are still served from cache, so it stays fast.
 
-### Step 2: Query Your Codebase
+### CLI command reference
 
-```bash
-# Find where a symbol is defined
-codegraphx query authenticateUser
-
-# Trace downstream impact (what does this function call?)
-codegraphx impact authenticateUser --direction downstream
-
-# Trace upstream impact (what calls this function?)
-codegraphx impact authenticateUser --direction upstream
-
-# View graph statistics
-codegraphx stats
-```
-
-### Step 3: Live Watch & Dashboard (Optional)
-
-```bash
-# Start file watcher for real-time updates
-codegraphx watch
-
-# Open interactive graph in browser
-codegraphx dashboard
-```
+| Command | Purpose |
+|---|---|
+| `cgx setup` | Wire the MCP server + skill into your coding CLIs (see below) |
+| `cgx init` / `cgx scan` | Full index of the codebase |
+| `cgx query <symbol>` | Show a symbol's file, type, `calls`, and `called_by` |
+| `cgx impact <symbol> [--direction up/downstream] [--depth N]` | Trace the blast radius |
+| `cgx doctor [--json] [--strict] [--no-calls]` | Diagnostics: imports, calls, cycles, syntax |
+| `cgx stats` | Counts of files / symbols / functions / classes / edges |
+| `cgx watch` | Auto-update the graph on file changes |
+| `cgx dashboard` | Open the interactive `codegraph.html` |
+| `cgx git-hook <install\|remove>` | Auto-scan on `post-commit` / `pre-push` |
+| `cgx session summary [--branch <b>]` | Structural change summary for the current session |
+| `cgx verify --task <desc> --commit <hash>` | Task-vs-commit verification evidence |
 
 ---
 
-## 🤖 MCP Server Integration
+## MCP server (for AI agents)
 
-CodeGraphX includes a **Model Context Protocol (MCP)** server that allows AI coding agents to query your codebase structure intelligently — saving tokens and eliminating cold-start scanning.
+CodeGraphX ships an MCP stdio server exposing 6 tools. **Zero-setup:** you don't have to scan first — on its first start in a project, the server indexes the codebase in the background. While indexing, `get_graph_status` reports `"indexing"`; once `"ready"`, all tools are live.
 
-**Zero-setup:** you do not need to run a scan first. On its first start in a project, the server automatically indexes the codebase in the background. While indexing, `get_graph_status` reports `"indexing"`; once it reports `"ready"`, every tool is live.
-
-### Available MCP Tools
+### Available MCP tools
 
 | Tool | Description | Parameters |
-|------|-------------|------------|
-| `get_graph_status` | Readiness check: `indexing`, `ready`, or `error`, plus file count | None |
-| `list_files` | Lists all indexed files | `filter?: string` |
-| `check_symbol_exists` | Instant O(1) Bloom-filter lookup — `probable_yes` / `definite_no` | `name: string` |
-| `explain_impact` | Blast radius of a symbol: who uses it upstream, what it breaks downstream | `symbol_name: string` |
-| `verify_task` | Compare a task description against a commit's actual changes — status, changed symbols, untested additions | `task_description: string`, `commit_hash?: string` |
-| `get_session_diff` | Summarize changes in current Git session/branch | `branch?: string` (default: `"HEAD"`) |
+|---|---|---|
+| `get_graph_status` | Readiness: `indexing` / `ready` / `error`, plus file count | — |
+| `list_files` | List indexed files | `filter?: string` |
+| `check_symbol_exists` | O(1) Bloom lookup → `probable_yes` / `definite_no` | `name: string` |
+| `explain_impact` | Upstream callers + downstream callees of a symbol | `symbol_name: string` |
+| `verify_task` | Compare a task description to a commit's real changes | `task_description: string`, `commit_hash?: string` |
+| `get_session_diff` | Structural summary of the current session/branch | `branch?: string` (default `HEAD`) |
 
-### Example Agent Workflow
+### Example agent workflow
 
 ```
 User: "What breaks if I change the validateInput function?"
 
 Agent (via MCP):
-1. check_symbol_exists({ name: "validateInput" })
-   → { "exists": "probable_yes" }
+  1. check_symbol_exists({ name: "validateInput" })   → { exists: "probable_yes" }
+  2. explain_impact({ symbol_name: "validateInput" })
+       → { used_by_upstream: ["src/auth.js::login"],
+           breaks_downstream: ["src/api.js::handleRequest"] }
 
-2. explain_impact({ symbol_name: "validateInput" })
-   → { "used_by_upstream": ["src/auth.js::login"], "breaks_downstream": ["src/api.js::handleRequest"] }
-
-Result: Instant answer without scanning 50+ files.
+Result: exact answer, no file scanning.
 ```
 
-### Picking the Project Root
+### Picking the project root
 
-The server indexes the directory it is started in. If your MCP client doesn't set a working directory, pass it explicitly — either way works:
+The server indexes the directory it starts in. If your client doesn't set one, pass it explicitly:
 
 ```bash
-cgx-mcp --project-root /path/to/your/project
+cgx-mcp --project-root /path/to/project
 # or
-CGX_PROJECT_ROOT=/path/to/your/project cgx-mcp
+CGX_PROJECT_ROOT=/path/to/project cgx-mcp
 ```
 
 ---
 
-## 🔌 Connecting MCP to AI Agents
+## Setup — how easy is it?
 
-### ⚡ One-command setup (Recommended)
-
-After installing, run a single command — no hand-editing config files, no hunting for absolute paths:
+### One command
 
 ```bash
 cgx setup
 ```
 
-It detects the coding CLIs you have installed (Claude Code, Gemini CLI, OpenCode, Cursor), lets you multi-select which to configure, then wires each one automatically:
-
-- **MCP server** — registered via the CLI's native command (`claude mcp add`, `gemini mcp add`, …) with a JSON-config fallback. Uses an absolute Node path + the bundled `cgx-mcp`, so it works for global *and* local installs and sidesteps Gemini's PATH gotcha.
-- **Skill / instructions** — drops the CodeGraphX usage skill into each CLI's format (`~/.claude/skills/cgx/SKILL.md`, `GEMINI.md`, `AGENTS.md`, Cursor rules) so the agent knows to use cgx.
+It **auto-detects** the coding CLIs you have installed, lets you multi-select which to configure, and wires each one — no hand-editing config, no hunting for absolute paths. It registers the MCP server (via each CLI's native command where available, with a JSON-file fallback) using an **absolute Node path + the bundled `cgx-mcp`**, so it works for both global and local installs, and it installs the CGX usage skill/instructions in each CLI's format.
 
 ```bash
-cgx setup                                  # interactive multi-select
-cgx setup --agents claude,gemini --yes     # non-interactive (CI / scripted)
-cgx setup --project                        # register for the current repo only
+cgx setup                                   # interactive multi-select
+cgx setup --agents claude,gemini --yes      # non-interactive (CI / scripted)
+cgx setup --project                         # register for the current repo only
 ```
 
-Registration is **user/global** by default, so you run it once and it works in every project — `cgx-mcp` resolves the project from the directory your CLI launches in. Existing config (other MCP servers, settings) is preserved; a `.cgx-bak` backup is written before the first edit.
+Registration is **user/global by default**, so you run it once and it works in every project — `cgx-mcp` resolves the project from wherever your CLI launches. Existing config is preserved; a backup is written before the first edit.
 
-Then just open your coding CLI in any project and ask it to *"use cgx to explore this codebase"*.
+### Supported coding-agent CLIs
 
-The manual per-agent instructions below remain available if you prefer to wire things up yourself.
+| Agent | Detected via | MCP registration | Skill / instructions |
+|---|---|---|---|
+| **Claude Code** | `claude` on PATH or `~/.claude` | `claude mcp add` → `~/.claude.json` or `.mcp.json` | `~/.claude/skills/cgx/SKILL.md` |
+| **Gemini CLI** | `gemini` on PATH | `~/.gemini/settings.json` or `.gemini/settings.json` | `GEMINI.md` (context file) |
+| **Antigravity CLI** | `agy` on PATH | `~/.gemini/config/mcp_config.json` or `.agents/mcp_config.json` | `~/.gemini/skills/cgx/SKILL.md` or `.agents/skills/cgx/SKILL.md` |
+| **OpenCode** | `opencode` on PATH | `opencode mcp` → config file | `AGENTS.md` |
+| **Cursor** | `~/.cursor` present | `~/.cursor/mcp.json` or `.cursor/mcp.json` | `.cursor/rules/*.mdc` |
 
-### 💻 Claude Code (CLI)
+Then open your CLI in any project and say *"use cgx to explore this codebase."*
 
-From inside your project directory:
+### If `cgx setup` doesn't work — manual setup
 
+The MCP entry is always the same shape: run the bundled `cgx-mcp` with an **absolute path to `node`** (some clients don't inherit your shell `PATH`). Find them with:
+
+```bash
+which node                    # e.g. /usr/local/bin/node
+which cgx-mcp                 # e.g. /usr/local/lib/node_modules/codegraphx/bin/cgx-mcp
+```
+
+**Claude Code** — from your project:
 ```bash
 claude mcp add codegraphx -- npx -y -p codegraphx cgx-mcp
 ```
-
-Or in your project's `.mcp.json`:
-
+or `.mcp.json`:
 ```json
-{
-  "mcpServers": {
-    "codegraphx": {
-      "command": "npx",
-      "args": ["-y", "-p", "codegraphx", "cgx-mcp"]
-    }
-  }
-}
+{ "mcpServers": { "codegraphx": { "command": "npx", "args": ["-y", "-p", "codegraphx", "cgx-mcp"] } } }
 ```
 
-### 🤖 Claude Desktop
-
-Edit `~/Library/Application Support/Claude/claude_desktop_config.json` (macOS) or `%APPDATA%\Claude\claude_desktop_config.json` (Windows). Claude Desktop has no project directory, so set the root explicitly:
-
+**Claude Desktop** — `~/Library/Application Support/Claude/claude_desktop_config.json` (macOS). No project dir, so set the root:
 ```json
-{
-  "mcpServers": {
-    "codegraphx": {
-      "command": "npx",
-      "args": ["-y", "-p", "codegraphx", "cgx-mcp", "--project-root", "/path/to/your/project"]
-    }
-  }
-}
+{ "mcpServers": { "codegraphx": {
+  "command": "npx",
+  "args": ["-y", "-p", "codegraphx", "cgx-mcp", "--project-root", "/path/to/project"]
+} } }
 ```
 
-### 🧭 Gemini CLI
-
-In your project's `.gemini/settings.json` (use an absolute path to `node` — Gemini doesn't inherit your shell PATH; see `mcp-setup.md` for troubleshooting):
-
+**Gemini CLI** — `.gemini/settings.json` (use an absolute `node` path):
 ```json
-{
-  "mcpServers": {
-    "codegraphx": {
-      "command": "/ABSOLUTE/PATH/TO/node",
-      "args": ["/ABSOLUTE/PATH/TO/node_modules/codegraphx/bin/cgx-mcp"],
-      "cwd": "/ABSOLUTE/PATH/TO/YOUR_PROJECT"
-    }
-  }
-}
+{ "mcpServers": { "codegraphx": {
+  "command": "/ABSOLUTE/PATH/TO/node",
+  "args": ["/ABSOLUTE/PATH/TO/node_modules/codegraphx/bin/cgx-mcp"],
+  "cwd": "/ABSOLUTE/PATH/TO/PROJECT"
+} } }
 ```
 
-> 💡 **Pro Tip**: If your client ignores `cwd`, add `"--project-root", "/path/to/project"` to `args` — it takes precedence over the working directory.
+**Antigravity CLI** (`agy`) — file-only, no native command. Global `~/.gemini/config/mcp_config.json` or per-project `.agents/mcp_config.json`:
+```json
+{ "mcpServers": { "codegraphx": {
+  "command": "/ABSOLUTE/PATH/TO/node",
+  "args": ["/ABSOLUTE/PATH/TO/node_modules/codegraphx/bin/cgx-mcp"]
+} } }
+```
 
-### 🪄 Cursor / Windsurf / Other MCP Clients
+**Cursor / Windsurf / other MCP clients** — `~/.cursor/mcp.json` (or project `.cursor/mcp.json`), same structure; point `cwd` at the project root.
 
-Most MCP clients support a `mcp.json` or settings file. Use the same structure as above, ensuring:
-- `cwd` points to your project root
-- The server has read access to your codebase
-- You've run `codegraphx scan` at least once (or let the server auto-initialize)
-
-### ✅ Verification
-
-After configuration, test the connection:
-
+**Verify the connection:**
 ```bash
-# In Gemini CLI
-/mcp list
-# Should show: ✓ codegraphx — Connected (6 tools)
+# inside the CLI
+/mcp list           # should show: codegraphx — Connected (6 tools)
 
-# Or manually test the MCP server
+# or drive the server directly
 echo '{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}' | npx -y -p codegraphx cgx-mcp
 ```
 
----
-
-## 🔐 Security & Privacy
-
-### Data Handling
-- ✅ **100% local execution** — No network calls, no telemetry, no cloud sync
-- ✅ **Read-only analysis** — CodeGraphX never modifies your source files
-- ✅ **Configurable ignore patterns** — Exclude sensitive directories via `.codegraphxrc`
-
-### Configuration Example (`.codegraphxrc`)
-
-```json
-{
-  "ignore": [
-    ".git",
-    "node_modules",
-    "__pycache__",
-    ".venv",
-    "secrets/",
-    "*.env",
-    "config/private/"
-  ],
-  "outputDir": ".codegraphx",
-  "extensions": [".py", ".js", ".ts"],
-  "bloomErrorRate": 0.01
-}
-```
-
-### MCP Security Notes
-- The MCP server runs with the same permissions as your terminal session
-- It only reads files matching configured extensions and ignore patterns
-- No code is executed — only parsed statically via Tree-sitter
-- For sensitive projects, run CodeGraphX in a sandboxed environment or container
+**Still disconnected?**
+1. Use an **absolute path to `node`**, not `npx`.
+2. Make sure `cwd` / `--project-root` matches your project exactly.
+3. `gemini trust` if using project-scoped Gemini settings.
+4. Inspect stderr: `node /path/to/cgx-mcp 2>&1 | head -20`.
 
 ---
 
-## 📁 Project Structure
+## Architecture
+
+### Data flow
 
 ```
-your-project/
-├── .codegraphx/              # Generated output (gitignore recommended)
-│   ├── codebase.json         # Full graph data
-│   ├── symbols.bloom         # Bloom filter for O(1) lookups
-│   ├── cache.json            # Incremental parse cache
-│   ├── codegraph.html        # Interactive dashboard
-│   ├── codegraph-graph.json  # D3.js compatible graph
-│   ├── file_index.toon       # Token-optimized file index
-│   ├── codegraph.toon        # Token-optimized full graph
-│   └── CHANGELOG.toon        # Session/commit change history
-├── .codegraphxrc             # Optional config file
-├── .gemini/
-│   └── mcp.json              # Gemini CLI MCP configuration
-└── GEMINI.md                 # Auto-generated agent instructions
+Source files
+   → parser.js            Tree-sitter, one adapter per language
+   → entities.js          SymbolEntity / FileEntity / EdgeEntity (the domain model)
+   → edgebuilder.js       CALLS / IMPORTS / INHERITS edges
+   → cross-language-linker.js   fetch/axios ⇄ Express/Flask/FastAPI  →  API_CALLS edges
+   → scanner.js           orchestrates a full scan; writes DB + .codegraphx/ artifacts
+   → store/sql-store.js   Kysely ORM — append-only bi-temporal graph (SQLite / Postgres)
 ```
 
-> 💡 Add `.codegraphx/` to your `.gitignore` — these are build artifacts, not source.
+After a scan, `.codegraphx.db` (in the project root) is the source of truth. The `.codegraphx/` directory holds derived artifacts: `codegraph.html` (dashboard), `codegraph-graph.json` (D3), `codegraph.toon` + `file_index.toon` (token-optimized), `symbols.bloom`, and `cache.json`.
+
+### Bi-temporal, append-only storage
+
+Rows in `files`, `symbols`, and `edges` are **never deleted**. Each carries `valid_from_commit_id` and `valid_to_commit_id`; `NULL` in the latter means "currently active." Editing a symbol closes the old row and inserts a new one; deleting a file temporal-closes its rows. This lets CGX answer *"what did the graph look like at commit X?"* and powers session/branch diffs and task verification — without ever losing history.
+
+### Key modules
+
+| Module | Role |
+|---|---|
+| `src/parser.js` | Routes a file to its language adapter; returns `declaredSymbols`, `imports`, `calls` |
+| `src/languages/*` | Per-language Tree-sitter adapters (python, javascript, typescript, html, css) |
+| `src/entities.js` | `SymbolEntity`, `FileEntity`, `EdgeEntity`, `Snapshot` domain model |
+| `src/edgebuilder.js` | Builds structural edges from parsed references |
+| `src/cross-language-linker.js` | Confidence-scored `API_CALLS` edges across the frontend/backend boundary |
+| `src/resolver.js` | Canonical import resolver (JS `./`/`../`, Python package-relative, dotted paths) |
+| `src/scanner.js` | `runScan()` — the indexing entrypoint; full-rewrite semantics; `mcpMode` skips heavy outputs |
+| `src/store/sql-store.js` | `SqlGraphStore` — all DB reads/writes; `traceImpact` uses a recursive SQL CTE; `pruneDeletedFiles` |
+| `src/store.js` | `GraphStore` — in-memory + `cache.json` layer used by the scanner and doctor |
+| `src/doctor.js` | Diagnostics engine (imports / calls / cycles / syntax) |
+| `src/verifier.js` | Task-vs-commit verification evidence |
+| `src/sdk/index.js` | `IntelligenceSDK` — programmatic API for embedding CGX |
+| `src/server/mcp-server.js` | `CodeGraphXServer` — the MCP stdio server |
+| `src/setup/*` | `cgx setup` orchestrator + per-CLI adapters |
+| `src/db/*` | Kysely `db` instance + migrations (`DB_DIALECT=postgres` + `DATABASE_URL` to switch) |
 
 ---
 
-## 🛠️ Advanced Usage
+## Benchmarks & accuracy
 
-### Custom Configuration
+CGX is meant to be *trusted in place of reading code*, so its graph is scored against a hand-labeled **golden corpus** (`tests/golden/`) where every symbol, edge, cross-language link, and import cycle is known. The same harness gates CI (`tests/golden/accuracy.test.js`) — a parser regression fails the build.
 
-Create `.codegraphxrc` in your project root:
-
-```json
-{
-  "extensions": [".py", ".js", ".ts", ".jsx", ".tsx", ".html", ".css"],
-  "ignore": [
-    ".git", "node_modules", "__pycache__", ".venv", "dist", "build",
-    "*.test.*", "*.spec.*", "coverage", ".next", ".nuxt"
-  ],
-  "outputDir": ".codegraphx",
-  "outputFile": "codebase.json",
-  "bloomErrorRate": 0.001
-}
-```
-
-### Git Integration
-
-Auto-update graph on commits:
-
-```bash
-# Install Git hooks
-codegraphx git-hook install
-
-# Hooks will auto-run `codegraphx scan` on:
-# - post-commit (after each commit)
-# - pre-push (before pushing to remote)
-
-# Remove hooks later
-codegraphx git-hook remove
-```
-
-### Health Check & Diagnostics
-
-```bash
-# Analyze graph for issues
-codegraphx doctor
-
-# JSON output for CI/CD
-codegraphx doctor --json
-
-# Strict mode: exit code 1 if issues found
-codegraphx doctor --strict
-
-# Skip call-target warnings (reduce noise)
-codegraphx doctor --no-calls
-```
-
-### Session Diff & Branch Comparison
-
-```bash
-# Summarize changes in current session
-codegraphx session summary
-
-# Compare two branches
-codegraphx diff main feature-branch
-
-# Output includes:
-# - added/removed/modified symbols
-# - Rule-based summary (e.g., "Added function processOrder")
-# - Impact analysis ready for agent review
-```
-
-### Cross-Language Intelligence
-
-CodeGraphX links the frontend to the backend automatically. During a scan it
-extracts the HTTP requests your client code makes and the routes your server
-exposes, then matches them into `API_CALLS` edges with a confidence score:
-
-```
-fetch('/api/users')        ──API_CALLS(0.9)──▶  app.get('/api/users', listUsers)   [Express]
-axios.post('/api/orders')  ──API_CALLS(0.9)──▶  @router.post('/api/orders')        [FastAPI]
-fetch(`/api/users/${id}`)  ──API_CALLS(0.7)──▶  @app.route('/api/users/<id>')      [Flask]
-```
-
-Supported on both sides of the stack:
-
-- **Frontend calls**: `fetch(...)` (with `method` option), `axios.get/post/...`, `axios({ url, method })`, and axios-like clients.
-- **Backend routes**: Express/`router` (`app.get`, `router.post`, …), Flask (`@app.route(..., methods=[...])`), and FastAPI (`@router.get`, `@app.post`, …).
-
-Confidence: `0.9` exact path + method, `0.75` exact path / different method,
-`0.7` parameterized path + method, `0.55` parameterized path / different method.
-Path parameters (`:id`, `{id}`, `<int:id>`) are normalized before matching, so a
-React component calling `/api/users/${id}` links to a FastAPI `/api/users/{user_id}`
-handler even though the two never reference each other directly. Route handlers
-are also tagged with an `endpoint` ontology marker, and `explain_impact` traverses
-`API_CALLS` edges — so an agent asking "what calls this backend handler?" sees the
-frontend functions across the language boundary.
-
----
-
-## 📊 Benchmarks / Accuracy
-
-CodeGraphX is meant to be *trusted* in place of reading code, so its graph is
-measured against a hand-labeled golden corpus (`tests/golden/`) where every
-symbol, edge, cross-language API link and import cycle is known. The same
-harness gates CI (`tests/golden/accuracy.test.js`) — a parser regression fails
-the build.
-
-Latest run (curated corpus: 3 fixtures, 9 files, 20 symbols):
+**Extraction accuracy** (curated corpus: 3 fixtures, 9 files, 20 symbols):
 
 | Category | Precision | Recall | F1 |
 |---|---|---|---|
@@ -412,12 +342,16 @@ Latest run (curated corpus: 3 fixtures, 9 files, 20 symbols):
 | Cross-language API links | 100% | 100% | 100% |
 | Endpoint tagging | 100% | 100% | 100% |
 
-| Reasoning check | Result |
+**Reasoning & determinism:**
+
+| Check | Result |
 |---|---|
 | Impact tracing (exact reachable set) | 4/4 (100%) |
 | Circular-import detection (recall) | 1/1 (100%) |
 | Circular-import false positives | 0 |
 | Deterministic across re-scans | yes |
+
+**Throughput:** ~82 files/sec, ~183 symbols/sec on the corpus (full scan in ~110 ms).
 
 Reproduce and regenerate [`BENCHMARK.md`](BENCHMARK.md) + `benchmark-results.json`:
 
@@ -425,134 +359,100 @@ Reproduce and regenerate [`BENCHMARK.md`](BENCHMARK.md) + `benchmark-results.jso
 npm run benchmark
 ```
 
-> Numbers reflect the controlled golden corpus, not arbitrary real-world repos —
-> they verify extraction *correctness*, not coverage of every language construct.
-> Extend the corpus under `tests/golden/<fixture>/` with a `ground-truth.json` to
-> raise the bar.
+> These numbers verify extraction *correctness* on a controlled corpus, not coverage of every language construct. Extend the bar by adding a fixture under `tests/golden/<name>/` with a `ground-truth.json`.
 
 ---
 
-## 🧪 Testing
+## Cross-language intelligence
 
-```bash
-# Run test suite
-npm test
+During a scan, CGX extracts the HTTP requests your client makes and the routes your server exposes, then matches them into confidence-scored `API_CALLS` edges:
 
-# Run specific test file
-npm test -- tests/server/mcp-server.test.js
-
-# Verify MCP server manually
-node tests/verify-mcp.js
+```
+fetch('/api/users')        ──API_CALLS(0.9)──▶  app.get('/api/users', listUsers)   [Express]
+axios.post('/api/orders')  ──API_CALLS(0.9)──▶  @router.post('/api/orders')        [FastAPI]
+fetch(`/api/users/${id}`)  ──API_CALLS(0.7)──▶  @app.route('/api/users/<id>')      [Flask]
 ```
 
+- **Frontend:** `fetch(...)` (with `method`), `axios.get/post/...`, `axios({ url, method })`.
+- **Backend:** Express/`router`, Flask (`@app.route(..., methods=[...])`), FastAPI (`@router.get`, `@app.post`, …).
+- **Confidence:** `0.9` exact path+method, `0.75` exact path/other method, `0.7` parameterized path+method, `0.55` parameterized/other. Path params (`:id`, `{id}`, `<int:id>`) are normalized first, so `/api/users/${id}` links to `/api/users/{user_id}`.
+
+Route handlers are tagged with an `endpoint` ontology marker, and `explain_impact` traverses `API_CALLS` edges — so *"what calls this backend handler?"* returns the frontend callers across the language boundary.
+
 ---
 
-## 🤝 Contributing
+## Security & privacy
 
-Contributions are welcome! Please follow these steps:
+- ✅ **100% local** — no network, no telemetry, no cloud sync.
+- ✅ **Read-only** — CGX never modifies your source.
+- ✅ **Static only** — code is *parsed*, never executed.
+- ✅ **Configurable ignores** — exclude sensitive paths via `.codegraphxrc`.
 
-1. Fork the repository
-2. Create a feature branch: `git checkout -b feat/your-feature`
-3. Make changes and add tests
-4. Run tests: `npm test`
-5. Submit a pull request
+The MCP server runs with your terminal's permissions and only reads files matching the configured extensions/ignores. For sensitive projects, run it in a sandbox or container.
 
-### Development Setup
+---
+
+## Configuration
+
+Project config lives in `.codegraphxrc` (JSON) or `codegraphx.config.json`:
+
+```json
+{
+  "extensions": [".py", ".js", ".ts", ".jsx", ".tsx", ".html", ".css"],
+  "ignore": [".git", "node_modules", "__pycache__", ".venv", "dist", "build", "coverage"],
+  "outputDir": ".codegraphx",
+  "outputFile": "codebase.json",
+  "bloomErrorRate": 0.01
+}
+```
+
+> Add `.codegraphx/` and `.codegraphx.db` to your `.gitignore` — they're build artifacts.
+
+---
+
+## FAQ
+
+**Do I need to run a scan every time?** No — the MCP server auto-indexes on first use. Re-scan (or `cgx watch`) to refresh after changes. Every re-scan is a clean full rewrite, so deletions and renames never leave stale graph data.
+
+**Large codebases?** Yes — incremental parsing means unchanged files are served from cache; only changed files are re-parsed.
+
+**Private / proprietary code?** Fine — everything runs locally, nothing leaves your machine.
+
+**MCP shows "Disconnected"?** Use an absolute `node` path, confirm `cwd`/`--project-root`, `gemini trust` for project scope, and check stderr (see manual setup above).
+
+**How accurate is the Bloom filter?** Tunable via `bloomErrorRate` (default `0.01`). False positives only trigger a fallback lookup — never false negatives.
+
+---
+
+## Contributing
 
 ```bash
 git clone https://github.com/techcraze00/CodeGraphX.git
 cd codegraphx
 npm install
-npm link  # Makes `codegraphx` command available globally
+npm link          # exposes `codegraphx` / `cgx` globally
+npm test
 ```
 
-### Adding New Language Support
-
-1. Add language grammar to `package.json` dependencies
-2. Register parser in `src/parser.js`
-3. Implement extractor in `src/graph.js`
-4. Add tests in `tests/parser/`
+Adding a language: add the Tree-sitter grammar to `package.json`, create an adapter under `src/languages/<lang>/`, register it in `src/languages/index.js`, and add a golden fixture under `tests/golden/`.
 
 ---
 
-## ❓ FAQ
+## License
 
-**Q: Do I need to run `codegraphx scan` every time?**  
-A: No. The server auto-initializes on first use. Re-scan only when you want to update the graph after significant changes, or use `codegraphx watch` for real-time updates.
-
-**Q: Does this work with large codebases?**  
-A: Yes. CodeGraphX uses incremental parsing and caching. A 10k-file Python project typically scans in 30-90 seconds on a modern machine, with subsequent updates processing only changed files.
-
-**Q: Can I use this with private/proprietary code?**  
-A: Absolutely. CodeGraphX runs 100% locally with no external dependencies or telemetry. Your code never leaves your machine.
-
-**Q: What if the MCP server shows "Disconnected"?**  
-A: Common fixes:
-1. Run `codegraphx scan` manually once
-2. Ensure `cwd` in MCP config matches your project root exactly
-3. Use absolute path to `node` instead of `npx`
-4. Run `gemini trust` if using project-scoped settings
-5. Check stderr: `node /path/to/cgx-mcp 2>&1 | head -20`
-
-**Q: How accurate is the Bloom filter?**  
-A: Configurable via `bloomErrorRate` (default: 0.01 = 1% false positive rate). False positives only cause a fallback to linear search — never false negatives.
+MIT © 2026 Prayas Jadhav. See [LICENSE](LICENSE).
 
 ---
 
-## 📄 License
+## Links
 
-CodeGraphX is released under the [MIT License](LICENSE).
+- **Package:** [`codegraphx` on npm](https://www.npmjs.com/package/codegraphx)
+- **Repository:** [github.com/techcraze00/CodeGraphX](https://github.com/techcraze00/CodeGraphX)
+- **Issues:** [github.com/techcraze00/CodeGraphX/issues](https://github.com/techcraze00/CodeGraphX/issues)
 
-```
-MIT License
+### Acknowledgments
 
-Copyright (c) 2026 Prayas Jadhav
+[Tree-sitter](https://tree-sitter.github.io/) · [Model Context Protocol](https://modelcontextprotocol.io/) · [Kysely](https://kysely.dev/) · [TOON](https://github.com/toon-format/toon) · [bloom-filters](https://github.com/Callidon/bloom-filters)
 
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.
-```
-
----
-
-## npm Package
-
-- **Package**: [`codegraphx`](https://www.npmjs.com/package/codegraphx)
-- **Latest Version**: [![npm version](https://img.shields.io/npm/v/codegraphx.svg)](https://www.npmjs.com/package/codegraphx)
-- **Downloads**: [![npm downloads](https://img.shields.io/npm/dm/codegraphx.svg)](https://www.npmjs.com/package/codegraphx)
-- **Repository**: [github.com/techcraze00/CodeGraphX](https://github.com/techcraze00/CodeGraphX)
-- **Issues & Feedback**: [github.com/techcraze00/CodeGraphX/issues](https://github.com/techcraze00/CodeGraphX/issues)
-
----
-
-## Acknowledgments
-
-- [Tree-sitter](https://tree-sitter.github.io/) — Incremental parsing engine
-- [Model Context Protocol](https://modelcontextprotocol.io/) — Agent communication standard
-- [TOON Format](https://github.com/toon-format/toon) — Token-optimized serialization
-- [bloom-filters](https://github.com/Callidon/bloom-filters) — Probabilistic data structures
-- The open-source community for inspiring efficient, local-first developer tools
-
----
-
-<p align="center">
-  <strong>CodeGraphX</strong> — Understand your codebase. Instantly.
-</p>
-
-<p align="center">
-  <sub>Built with ❤️ for developers and AI agents alike.</sub>
-</p>
+<p align="center"><strong>CodeGraphX</strong> — Understand your codebase. Instantly.</p>
+<p align="center"><sub>Built for developers and AI agents alike.</sub></p>
