@@ -181,6 +181,47 @@ describe('SqlGraphStore', () => {
     expect(oldEdges[0].valid_to_commit_id).toBe(c2);
   });
 
+  test('pruneDeletedFiles closes files (and their symbols/edges) missing from disk', async () => {
+    const c1 = await store.addCommit(repoId, 'prune-1', 'add two files');
+    const fKeep = await store.updateFile(repoId, c1, '/keep.js', 'kh1', 'javascript');
+    const fGone = await store.updateFile(repoId, c1, '/gone.js', 'gh1', 'javascript');
+
+    await store.updateSymbols(repoId, c1, fKeep, [
+      { qualified_name: 'Keep', name: 'Keep', kind: 'function', symbol_hash: 'kS1', start_line: 1, end_line: 2 },
+    ]);
+    await store.updateSymbols(repoId, c1, fGone, [
+      { qualified_name: 'Gone', name: 'Gone', kind: 'function', symbol_hash: 'gS1', start_line: 1, end_line: 2 },
+    ]);
+
+    const syms = await db.selectFrom('symbols').where('repository_id', '=', repoId)
+      .where('valid_to_commit_id', 'is', null).selectAll().execute();
+    const keepId = syms.find(s => s.name === 'Keep').id;
+    const goneId = syms.find(s => s.name === 'Gone').id;
+    await store.updateEdges(repoId, c1, [{
+      from_symbol_id: keepId, to_symbol_id: goneId, type: 'CALLS', confidence: 1.0, discovered_by: 'AST', edge_hash: 'prune-edge',
+    }]);
+
+    // /gone.js deleted from disk; only /keep.js remains
+    const c2 = await store.addCommit(repoId, 'prune-2', 'delete gone.js');
+    // Other suite tests share this repo, so several unrelated files are also
+    // active; the prune closes every file absent from the current set.
+    const closed = await store.pruneDeletedFiles(repoId, c2, new Set(['/keep.js']));
+    expect(closed).toBeGreaterThanOrEqual(1);
+
+    // gone.js file + its symbol + the connecting edge are closed at c2
+    const goneFile = await db.selectFrom('files').where('path', '=', '/gone.js')
+      .where('valid_to_commit_id', 'is', null).selectAll().executeTakeFirst();
+    expect(goneFile).toBeUndefined();
+    const goneSym = await db.selectFrom('symbols').where('id', '=', goneId).selectAll().executeTakeFirst();
+    expect(goneSym.valid_to_commit_id).toBe(c2);
+    const edge = await db.selectFrom('edges').where('edge_hash', '=', 'prune-edge').selectAll().executeTakeFirst();
+    expect(edge.valid_to_commit_id).toBe(c2);
+
+    // keep.js and its symbol remain active
+    const keepSym = await db.selectFrom('symbols').where('id', '=', keepId).selectAll().executeTakeFirst();
+    expect(keepSym.valid_to_commit_id).toBeNull();
+  });
+
   test('getChangesInCommit identifies added, modified, and removed symbols', async () => {
     const c1 = await store.addCommit(repoId, 'diff-1', 'Initial');
     const f1 = await store.updateFile(repoId, c1, '/lib.js', 'h1', 'javascript');

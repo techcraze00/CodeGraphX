@@ -267,6 +267,60 @@ class SqlGraphStore {
 
     await this.db.insertInto('edges').values(edgesToInsert).execute();
   }
+
+  /**
+   * Temporal-close every currently-active file (and its symbols + touching
+   * edges) whose path is not in `currentPaths` — i.e. files deleted from disk
+   * since the last scan. Keeps the active graph in sync with the working tree.
+   * @param {string} repositoryId
+   * @param {string} currentCommitId
+   * @param {Set<string>} currentPaths - relative paths present on disk now
+   * @returns {Promise<number>} count of files closed
+   */
+  async pruneDeletedFiles(repositoryId, currentCommitId, currentPaths) {
+    return await this.db.transaction().execute(async (trx) => {
+      const activeFiles = await trx.selectFrom('files')
+        .selectAll()
+        .where('repository_id', '=', repositoryId)
+        .where('valid_to_commit_id', 'is', null)
+        .execute();
+
+      const staleFileIds = activeFiles
+        .filter(f => !currentPaths.has(f.path))
+        .map(f => f.id);
+      if (staleFileIds.length === 0) return 0;
+
+      const staleSymbols = await trx.selectFrom('symbols')
+        .select(['id'])
+        .where('file_id', 'in', staleFileIds)
+        .where('valid_to_commit_id', 'is', null)
+        .execute();
+      const staleSymbolIds = staleSymbols.map(s => s.id);
+
+      if (staleSymbolIds.length > 0) {
+        await trx.updateTable('edges')
+          .set({ valid_to_commit_id: currentCommitId })
+          .where('valid_to_commit_id', 'is', null)
+          .where((eb) => eb.or([
+            eb('from_symbol_id', 'in', staleSymbolIds),
+            eb('to_symbol_id', 'in', staleSymbolIds),
+          ]))
+          .execute();
+
+        await trx.updateTable('symbols')
+          .set({ valid_to_commit_id: currentCommitId })
+          .where('id', 'in', staleSymbolIds)
+          .execute();
+      }
+
+      await trx.updateTable('files')
+        .set({ valid_to_commit_id: currentCommitId })
+        .where('id', 'in', staleFileIds)
+        .execute();
+
+      return staleFileIds.length;
+    });
+  }
 }
 
 module.exports = { SqlGraphStore };

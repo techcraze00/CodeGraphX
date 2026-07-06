@@ -11,6 +11,21 @@ const { buildEdges } = require('./edgebuilder');
 const { Snapshot, FileEntity } = require('./entities');
 
 /**
+ * Delete every artifact in the output directory and recreate it empty, so a
+ * rescan can never leave stale files behind. Refuses any target that isn't
+ * strictly inside the project root (guards against a misconfigured outputDir).
+ */
+function cleanOutputDir(outputDir, projectRoot) {
+  const resolved = path.resolve(outputDir);
+  const root = path.resolve(projectRoot);
+  if (resolved === root || !resolved.startsWith(root + path.sep)) {
+    return; // unsafe target — do not wipe
+  }
+  fs.rmSync(resolved, { recursive: true, force: true });
+  ensureDirSync(resolved);
+}
+
+/**
  * Core scanning logic - extracts symbols, builds graph, outputs artifacts
  * Can be called by CLI or MCP server
  * @param {string} projectRoot - Absolute path to project root
@@ -39,9 +54,21 @@ async function runScan(projectRoot, config, mcpMode = false) {
     files.push(...findFiles(projectRoot, ext, [], ignoreList));
   }
   
+  // Load the existing cache into memory (unchanged files stay incremental),
+  // then evict any file no longer on disk so its stale symbols can't survive
+  // into the regenerated graph. `currentRelSet` is the working-tree file set.
   const store = new GraphStore(projectRoot, config);
   const pgStore = new SqlGraphStore(db);
-  
+
+  const currentRelSet = new Set(files.map(fp => path.relative(projectRoot, fp)));
+  store.pruneExcept(currentRelSet);
+
+  // Full rewrite: nuke the output dir so no stale artifacts linger, then
+  // regenerate everything below from the pruned, current-only store. The
+  // in-memory cache (loaded above) is re-saved fresh, so unchanged files are
+  // not re-parsed.
+  cleanOutputDir(outputDir, projectRoot);
+
   // Ensure a repository exists in the database
   let repo = await db.selectFrom('repositories').selectAll().limit(1).executeTakeFirst();
   if (!repo) {
@@ -105,8 +132,17 @@ async function runScan(projectRoot, config, mcpMode = false) {
     }
   }
   
+  // Temporal-close files (and their symbols/edges) deleted from disk so the
+  // active DB graph stays in sync with the working tree for MCP queries.
+  try {
+    await pgStore.pruneDeletedFiles(repositoryId, commitId, currentRelSet);
+  } catch (e) {
+    if (!mcpMode) console.warn('[DB PRUNE] Could not prune deleted files:', e.message);
+    else process.stderr.write(`[CodeGraphX] DB prune error: ${e.message}\n`);
+  }
+
   store.saveCache();
-  
+
   const filesData = store.getFilesData();
   const astEdges = buildEdges(filesData);
 

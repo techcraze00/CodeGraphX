@@ -130,6 +130,29 @@ class GraphStore {
     return { removed: false, delta: null };
   }
 
+  /**
+   * Drop any cached file whose relative path is not in `keepRelPaths`.
+   * Used by a full rescan to evict files deleted from disk so their stale
+   * symbols don't survive into the regenerated graph/artifacts.
+   * @param {Set<string>} keepRelPaths - relative paths currently on disk
+   * @returns {string[]} the relative paths that were pruned
+   */
+  pruneExcept(keepRelPaths) {
+    const pruned = [];
+    for (const rel of [...this.cache.keys()]) {
+      if (keepRelPaths.has(rel)) continue;
+      const entry = this.cache.get(rel);
+      if (entry && entry.entities && entry.entities.symbols) {
+        entry.entities.symbols.forEach(sym => {
+          if (sym.id) this.symbolIndex.delete(sym.id);
+        });
+      }
+      this.cache.delete(rel);
+      pruned.push(rel);
+    }
+    return pruned;
+  }
+
   getFilesData() {
     const files = [];
     for (const [file, entry] of this.cache.entries()) {
