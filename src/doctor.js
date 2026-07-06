@@ -2,6 +2,11 @@ const path = require('path');
 const { execSync } = require('child_process');
 const { resolveImport: resolveImportShared } = require('./resolver');
 
+// Non-code assets imported by bundlers (images, fonts, media, styles, data).
+// These resolve to real files on disk but are never parsed into the graph, so
+// they must not be reported as "missing" code imports.
+const ASSET_IMPORT_RE = /\.(png|jpe?g|gif|svg|webp|avif|ico|bmp|woff2?|ttf|otf|eot|mp4|webm|ogg|mp3|wav|flac|pdf|css|scss|sass|less|styl|json|graphql|gql|md|txt|csv|xml|yaml|yml|wasm|glsl|vert|frag)(\?.*)?$/i;
+
 // ── Cache for dynamic built-ins ──────────────────────────────────────────
 let cachedBuiltins = null;
 
@@ -18,6 +23,17 @@ function getBuiltins() {
     'dataclass', 'field', 'fields', 'asdict', 'astuple', 'make_dataclass',
     'List', 'Dict', 'Set', 'Tuple', 'Optional', 'Union', 'Any', 'Callable', 'Iterable', 'Iterator',
     'TypedDict', 'Literal', 'Protocol', 'runtime_checkable', 'Annotated', 'Final', 'ClassVar',
+    // Browser / DOM globals (not present in Node's `global`, so `node -e` below
+    // won't list them). Common in React/frontend code.
+    'window', 'document', 'navigator', 'location', 'history', 'localStorage', 'sessionStorage',
+    'requestAnimationFrame', 'cancelAnimationFrame', 'requestIdleCallback', 'cancelIdleCallback',
+    'alert', 'confirm', 'prompt', 'getComputedStyle', 'matchMedia', 'scrollTo', 'scrollBy',
+    'IntersectionObserver', 'ResizeObserver', 'MutationObserver', 'PerformanceObserver',
+    'FileReader', 'Image', 'Audio', 'Notification', 'Worker', 'SharedWorker', 'WebSocket',
+    'XMLHttpRequest', 'FormData', 'Blob', 'File', 'FileList', 'DOMParser', 'Event',
+    'CustomEvent', 'FontFace',
+    // `import(...)` dynamic import reads as a call with function text "import".
+    'import', 'require',
   ]);
 
   // Python built-ins and standard library modules
@@ -170,6 +186,8 @@ function runDoctor(filesData, projectRoot) {
     }
 
     for (const imp of f.imports || []) {
+      const impStr = typeof imp === 'string' ? imp : imp.source;
+      if (impStr && ASSET_IMPORT_RE.test(impStr)) continue; // asset, not code
       const resolved = resolveImport(imp, displayFile);
       if (!resolved && looksLocal(imp, displayFile)) {
         const importLabel = typeof imp === 'string' ? imp : (imp.source || imp.localName || 'unknown');
@@ -184,12 +202,14 @@ function runDoctor(filesData, projectRoot) {
 
     const SELF_REFS = new Set(['self', 'cls', 'super', 'this']);
 
-    // Union of every parameter name declared in the file. A call to any of
-    // these is a local/closure binding (e.g. a nested fn calling its parent's
-    // `resolve`), not a missing top-level symbol.
-    const fileParams = new Set();
+    // Union of every locally-bound name in the file: function parameters plus
+    // `const`/`let`/`var` / assignment targets (incl. React's
+    // `const [x, setX] = useState()`, `const navigate = useNavigate()`). A call
+    // to any of these is a local/closure binding, not a missing top-level symbol.
+    const localBindings = new Set();
     for (const sym of f.symbols || []) {
-      for (const p of sym.params || []) fileParams.add(p);
+      for (const p of sym.params || []) localBindings.add(p);
+      for (const l of sym.locals || []) localBindings.add(l);
     }
 
     for (const sym of f.symbols || []) {
@@ -208,9 +228,9 @@ function runDoctor(filesData, projectRoot) {
         // symbol named `b` would otherwise make `b.trim()` look "resolved".
         if (callee.includes('.')) continue;
 
-        // A call to a parameter (own or an enclosing scope's) is a local
-        // binding, not a missing top-level symbol.
-        if (fileParams.has(callee)) continue;
+        // A call to a local binding (param, or a var/const in any scope of the
+        // file, e.g. a React state setter) is not a missing top-level symbol.
+        if (localBindings.has(callee)) continue;
 
         const issueKey = `${sym.name}:${callee}`;
         if (fileUnresolvedSeen.has(issueKey)) continue;

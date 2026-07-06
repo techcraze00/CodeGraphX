@@ -30,6 +30,7 @@ class JavaScriptAdapter extends BaseAdapter {
           startPosition: node.startPosition,
           calls: this.extractCalls(node, contents),
           params: this.extractParams(node),
+          locals: this.extractLocals(node),
           ontology: []
         });
       } else if (node.type === "class_declaration") {
@@ -40,6 +41,7 @@ class JavaScriptAdapter extends BaseAdapter {
           startPosition: node.startPosition,
           calls: this.extractCalls(node, contents),
           params: this.extractParams(node),
+          locals: this.extractLocals(node),
           ontology: []
         });
       } else if (node.type === "variable_declarator") {
@@ -52,6 +54,7 @@ class JavaScriptAdapter extends BaseAdapter {
              startPosition: node.startPosition,
              calls: this.extractCalls(valueNode, contents),
              params: this.extractParams(valueNode),
+             locals: this.extractLocals(valueNode),
              ontology: []
            });
         }
@@ -174,6 +177,41 @@ class JavaScriptAdapter extends BaseAdapter {
       if (FN_TYPES.has(n.type)) {
         const p = n.childForFieldName('parameters') || n.childForFieldName('parameter');
         if (p) collectBindings(p);
+      }
+      for (let i = 0; i < n.namedChildCount; i++) stack.push(n.namedChild(i));
+    }
+    return Array.from(names);
+  }
+
+  /**
+   * Collect locally-bound names declared anywhere in a symbol's subtree:
+   * `const`/`let`/`var` declarators (including array/object destructuring —
+   * e.g. React's `const [x, setX] = useState()`) and nested function/class
+   * declarations. A call to any of these is a local binding, not a missing
+   * top-level symbol. Walks the whole subtree because `extractCalls` does too.
+   */
+  extractLocals(fnNode) {
+    const names = new Set();
+    const collectBindings = (n) => {
+      if (!n) return;
+      if (n.type === 'identifier' || n.type === 'shorthand_property_identifier_pattern') { names.add(n.text); return; }
+      if (n.type === 'assignment_pattern') { collectBindings(n.childForFieldName('left')); return; }
+      if (n.type === 'pair_pattern') { collectBindings(n.childForFieldName('value')); return; }
+      for (let i = 0; i < n.namedChildCount; i++) collectBindings(n.namedChild(i));
+    };
+    const stack = [fnNode];
+    while (stack.length) {
+      const n = stack.pop();
+      if (!n) continue;
+      if (n.type === 'variable_declarator') {
+        collectBindings(n.childForFieldName('name'));
+      } else if (
+        n.type === 'function_declaration' ||
+        n.type === 'generator_function_declaration' ||
+        n.type === 'class_declaration'
+      ) {
+        const nm = n.childForFieldName('name');
+        if (nm) names.add(nm.text);
       }
       for (let i = 0; i < n.namedChildCount; i++) stack.push(n.namedChild(i));
     }

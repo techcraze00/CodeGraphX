@@ -157,6 +157,22 @@ import os as myos
     expect(sym.params).toEqual(expect.arrayContaining(['url', 'resolve', 'reject']));
   });
 
+  test('captures local var bindings incl. array-destructured useState setters', () => {
+    const adapter = ADAPTERS['.js'].adapter;
+    const src = 'function C(){ const [v, setV] = useState(0); const navigate = useNavigate(); }';
+    const tree = adapter.parse(src);
+    const sym = adapter.extractSymbols(tree, src).find(s => s.name === 'C');
+    expect(sym.locals).toEqual(expect.arrayContaining(['v', 'setV', 'navigate']));
+  });
+
+  test('Python captures local assignment targets and nested defs', () => {
+    const adapter = ADAPTERS['.py'].adapter;
+    const src = 'def outer():\n    svc = get_service()\n    a, b = pair()\n    def helper():\n        return 1\n';
+    const tree = adapter.parse(src);
+    const sym = adapter.extractSymbols(tree, src).find(s => s.name === 'outer');
+    expect(sym.locals).toEqual(expect.arrayContaining(['svc', 'a', 'b', 'helper']));
+  });
+
   test('captures renamed require destructure as an import', () => {
     const adapter = ADAPTERS['.js'].adapter;
     const src = "const { runScan: doScan } = require('./scanner');";

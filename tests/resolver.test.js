@@ -57,6 +57,7 @@ const { runDoctor } = require('../src/doctor');
 const dfile = (f, { imports = [], symbols = [], parseError } = {}) => ({
   file: f, path: f, symbols, imports, syntaxErrors: [], parseError,
 });
+const dimport = (source) => ({ source, localName: null, importedName: null });
 const dimp = (source, localName = source) => ({ source, localName, importedName: localName });
 
 describe('runDoctor', () => {
@@ -138,5 +139,60 @@ describe('runDoctor', () => {
     ];
     const callees = runDoctor(files, root).issues.unresolvedCalls.map(c => c.callee);
     expect(callees).toContain('totallyUndefinedFn');
+  });
+
+  test('does not flag React local bindings (useState setters, hook consts)', () => {
+    // const [publicKey, setPublicKey] = useState() → locals capture both names.
+    // const navigate = useNavigate() → local const.
+    const files = [
+      dfile('ChatPage.jsx', {
+        symbols: [{
+          name: 'ChatPage',
+          calls: ['setPublicKey', 'navigate', 'setIsLoading'],
+          locals: ['publicKey', 'setPublicKey', 'navigate', 'isLoading', 'setIsLoading'],
+        }],
+      }),
+    ];
+    expect(runDoctor(files, root).issues.unresolvedCalls).toEqual([]);
+  });
+
+  test('does not flag browser/DOM globals or dynamic import()', () => {
+    const files = [
+      dfile('anim.js', {
+        symbols: [{
+          name: 'loop',
+          calls: ['requestAnimationFrame', 'cancelAnimationFrame', 'import', 'requestIdleCallback', 'getComputedStyle'],
+        }],
+      }),
+    ];
+    expect(runDoctor(files, root).issues.unresolvedCalls).toEqual([]);
+  });
+
+  test('does not flag non-code asset imports as missing', () => {
+    const files = [
+      dfile('View.jsx', {
+        imports: [dimport('../assets/hero-bg.png'), dimport('./styles.css'), dimport('./missing-code')],
+      }),
+    ];
+    const missing = runDoctor(files, root).issues.missingImports.map(m => m.import);
+    expect(missing).not.toContain('../assets/hero-bg.png');
+    expect(missing).not.toContain('./styles.css');
+    expect(missing).toContain('./missing-code');
+  });
+
+  test('does not flag Python local assignment targets or nested defs', () => {
+    const files = [
+      dfile('mod.py', {
+        symbols: [{
+          name: 'outer',
+          calls: ['svc', 'helper', 'genuinely_missing_fn'],
+          locals: ['svc', 'helper'],
+        }],
+      }),
+    ];
+    const callees = runDoctor(files, root).issues.unresolvedCalls.map(c => c.callee);
+    expect(callees).not.toContain('svc');
+    expect(callees).not.toContain('helper');
+    expect(callees).toContain('genuinely_missing_fn');
   });
 });

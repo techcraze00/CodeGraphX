@@ -45,6 +45,7 @@ class PythonAdapter extends BaseAdapter {
             startPosition: definition.startPosition,
             calls,
             params: this.extractParams(definition),
+            locals: this.extractLocals(definition),
             decorators,
             ontology
           });
@@ -57,6 +58,7 @@ class PythonAdapter extends BaseAdapter {
           startPosition: node.startPosition,
           calls,
           params: this.extractParams(node),
+          locals: this.extractLocals(node),
           decorators: [],
           ontology: []
         });
@@ -159,6 +161,49 @@ class PythonAdapter extends BaseAdapter {
       if (!n) continue;
       if (n.type === 'function_definition' || n.type === 'lambda') {
         collectFrom(n.childForFieldName('parameters'));
+      }
+      for (let i = 0; i < n.namedChildCount; i++) stack.push(n.namedChild(i));
+    }
+    return Array.from(names);
+  }
+
+  /**
+   * Collect locally-bound names in a symbol's subtree: assignment targets
+   * (`x = ...`, tuple unpacking), `for`/`with`/walrus bindings, and nested
+   * `def`/`class` names. A call to any of these is a local binding, not a
+   * missing top-level symbol. Walks the whole subtree (like `extractCalls`).
+   */
+  extractLocals(defNode) {
+    const names = new Set();
+    if (!defNode) return [];
+    const collectTargets = (n) => {
+      if (!n) return;
+      if (n.type === 'identifier') { names.add(n.text); return; }
+      // pattern_list / tuple_pattern / list_pattern -> recurse; skip attribute/subscript
+      if (n.type === 'pattern_list' || n.type === 'tuple_pattern' || n.type === 'list_pattern') {
+        for (let i = 0; i < n.namedChildCount; i++) collectTargets(n.namedChild(i));
+      }
+    };
+    const stack = [defNode];
+    while (stack.length) {
+      const n = stack.pop();
+      if (!n) continue;
+      if (n.type === 'assignment') {
+        collectTargets(n.childForFieldName('left'));
+      } else if (n.type === 'named_expression') {
+        collectTargets(n.childForFieldName('name'));
+      } else if (n.type === 'for_statement') {
+        collectTargets(n.childForFieldName('left'));
+      } else if (n.type === 'as_pattern') {
+        // `with x as y` / `except E as y` — the alias is the last named child
+        const alias = n.namedChild(n.namedChildCount - 1);
+        if (alias && alias.type === 'as_pattern_target') collectTargets(alias.namedChild(0));
+        else collectTargets(alias);
+      } else if (n.type === 'function_definition' || n.type === 'class_definition') {
+        const nm = n.childForFieldName('name');
+        // The subtree root (defNode) is itself the owning symbol; only nested
+        // defs/classes count as locals.
+        if (nm && n !== defNode) names.add(nm.text);
       }
       for (let i = 0; i < n.namedChildCount; i++) stack.push(n.namedChild(i));
     }
